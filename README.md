@@ -5,8 +5,7 @@ Eine Android-App für eine dauerhaft laufende Fotoshow auf Android TV und Fire T
 ## Funktionen
 
 - **Lokale Bilder:** Mehrere Bilder aus dem Dateiauswahldialog wählen; Auswahl und Leseberechtigungen bleiben auf dem Gerät gespeichert.
-- **Google Fotos Picker:** Fotos in Google Fotos am Handy auswählen; der Fernseher übernimmt die Auswahl und lädt Bilder für eine zuverlässige, offlinefähige Wiedergabe lokal in seinen privaten Speicher. Videos werden übersprungen.
-- **Google Fotos:** Fotos am Handy mit dem Picker auswählen und für eine stabile Wiedergabe auf den Fernseher laden. Ambient ist in der App deaktiviert, damit kein nicht freigegebener API-Aufruf zu irreführenden Fehlern führt.
+- **Google Fotos:** Der Picker-Zugriff ist vorbereitet, derzeit aber deaktiviert. Google erlaubt den benötigten Photos-Picker-Scope nicht im OAuth-Gerätecode-Flow für Fernseher. Ambient ist ebenfalls deaktiviert.
 - **Diashow:** Shuffle, Bilddauer von 3 bis 60 Sekunden, nächste/zurück-Steuerung, weiche Übergänge und optionaler langsamer Schwenk mit Zoom.
 - **TV-Betrieb:** Bildschirm bleibt während der Wiedergabe aktiv; Vollbilddarstellung und Steuerung über Fernbedienung.
 - **Displayausrichtung:** Beim ersten Start Quer- oder Hochformat wählen. Die gesamte Oberfläche einschließlich Einstellungen und QR-Auswahl wird gedreht; die Richtungstasten der Fernbedienung werden passend dazu umgelegt.
@@ -18,21 +17,19 @@ Eine Android-App für eine dauerhaft laufende Fotoshow auf Android TV und Fire T
 
 ## Google Fotos einrichten
 
-Die App verwendet vorrangig die **Google Photos Picker API**. Der Fernseher zeigt einen QR-Code, du bestätigst den Zugriff und wählst auf dem Handy die gewünschten Fotos aus. Nach dem Abruf speichert die App die Bilddateien lokal auf dem TV, damit die Diashow nicht fortlaufend eine Internetverbindung braucht. Der Picker gewährt Zugriff nur auf die ausgewählten Elemente; er bietet keine dauerhafte Synchronisierung eines Albums.
+Die App enthält die **Google Photos Picker API**-Anbindung, startet sie aktuell jedoch nicht: Google listet den benötigten `photospicker.mediaitems.readonly`-Scope nicht für den OAuth-Gerätecode-Flow von TVs und Geräten mit eingeschränkter Eingabe ([zulässige Gerätescopes](https://developers.google.com/identity/protocols/oauth2/limited-input-device#allowed-scopes), [Picker-Scope](https://developers.google.com/photos/overview/authorization)). Ein Versuch scheitert deshalb bereits beim Anfordern des QR-/Gerätecodes. Die App zeigt stattdessen einen erklärenden Hinweis; lokale und bereits zwischengespeicherte Fotos lassen sich weiter verwenden. Eine künftige Google-Fotos-Verbindung braucht einen anderen unterstützten OAuth-Weg.
 
 Die Ambient-Anbindung ist derzeit deaktiviert und wird von der App nicht aufgerufen. Sie kann später wieder aktiviert werden, falls Google das Projekt ins [Google Photos Partner Program](https://developers.google.com/photos/partner-program/overview) aufnimmt.
 
 Für Google Fotos sind diese Schritte in Google Cloud erforderlich:
 
-1. Die **Google Photos Picker API** im Projekt aktivieren.
-2. Einen OAuth-Client des Typs **TVs and Limited Input devices** anlegen. Ein Android-Client ist für den QR-/Gerätecode-Flow nicht geeignet.
-3. Den OAuth-Zustimmungsbildschirm für den Bereich `https://www.googleapis.com/auth/photospicker.mediaitems.readonly` konfigurieren und die OAuth-Verifizierung beantragen, wenn die Warnung für Nutzer entfernt werden soll.
-4. Für lokale Builds `AMBIENT_CLIENT_ID` und `AMBIENT_CLIENT_SECRET` als Umgebungsvariablen oder Gradle-Properties `ambientClientId` / `ambientClientSecret` bereitstellen. Diese vorhandenen Variablennamen gelten für beide Google-Photos-Flows.
-5. Für Release-Builds dieselben Picker-OAuth-Werte als GitHub Actions Secrets `AMBIENT_CLIENT_ID` und `AMBIENT_CLIENT_SECRET` speichern. Die bisherigen Secret-Namen versorgen aktuell nur den Picker-Flow. Signatur-Secrets sind zusätzlich nötig (siehe unten).
+1. Der Picker benötigt `https://www.googleapis.com/auth/photospicker.mediaitems.readonly`; Google unterstützt diesen Scope derzeit nicht im OAuth-Gerätecode-Flow für TVs. Das Aktivieren der API und ein TV-OAuth-Client allein beheben diese Einschränkung nicht.
+2. Der Picker kann erst wieder angeboten werden, wenn ein anderer von Google unterstützter OAuth-Weg für Fire TV eingerichtet ist.
+3. Ambient bleibt bis zur Google-Freigabe im Partnerprogramm deaktiviert. Die aktuelle App startet für Google Fotos weder OAuth noch Ambient-Aufrufe.
 
-Für eine öffentliche Nutzung muss die OAuth-App die Google-Prüfung bestehen. Ein Client-Secret in einer Android-App lässt sich technisch aus dem APK extrahieren; es ist daher kein Geheimnis gegenüber App-Nutzern. Das Secret gehört dennoch nicht in Git oder öffentliche Workflow-Logs. Die Partnerprogramm-Freigabe für Ambient ist davon unabhängig; Ambient wird aktuell nicht verwendet.
+OAuth-Client-Secrets gehören nicht in Git oder öffentliche Workflow-Logs. Die Partnerprogramm-Freigabe für Ambient ist davon unabhängig; Ambient wird aktuell nicht verwendet.
 
-Der Picker erzeugt für jede Fotoauswahl eine kurzlebige Auswahl-Sitzung. Nach dem Abruf löscht die App diese Sitzung wieder. Eine geänderte Auswahl startest du erneut über „Google Fotos“.
+Lokal ausgewählte Bilder und bereits übernommene Picker-Dateien werden im privaten App-Speicher wiederverwendet. Eine neue Picker-Auswahl ist momentan deaktiviert.
 
 ## Bauen und installieren
 
@@ -43,7 +40,7 @@ Benötigt JDK 17 und Android SDK Platform 36. Auf macOS liegt das SDK üblicherw
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Alternativ das Projekt in Android Studio öffnen und die `app`-Konfiguration starten. Mindestversion ist Android 5.1 (API 22, Fire OS 5). Fire-TV-Geräte ohne Google Play-Dienste können lokale Bilder verwenden; der Picker nutzt den Google-OAuth-Gerätecode-Flow.
+Alternativ das Projekt in Android Studio öffnen und die `app`-Konfiguration starten. Mindestversion ist Android 5.1 (API 22, Fire OS 5). Fire-TV-Geräte können lokale Bilder verwenden.
 
 ## CI, APK und GitHub Pages
 
@@ -52,7 +49,6 @@ Alternativ das Projekt in Android Studio öffnen und die `app`-Konfiguration sta
 - Die [Download- und Demo-Seite](https://weisser-dev.github.io/google-photos-carousel/) verweist auf die neueste APK. Downloader-Adresse: `https://github.com/weisser-dev/google-photos-carousel/releases/latest/download/app-release.apk`.
 - Die installierte App prüft beim Start automatisch auf neuere stabile GitHub-Releases. Bei einem Treffer kann man die APK direkt laden und den Systemdialog zur Installation öffnen. Android/Fire OS verlangt weiterhin eine Bestätigung; ab Android 8 muss gegebenenfalls die Installation unbekannter Apps für Photo Carousel erlaubt werden.
 - Android Signatur-Secrets: `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` und `ANDROID_STORE_PASSWORD`. Bei Folgeversionen immer denselben Keystore benutzen.
-- Picker OAuth Secrets (historische Variablennamen): `AMBIENT_CLIENT_ID` und `AMBIENT_CLIENT_SECRET`.
 
 ## Private lokale Dateien
 

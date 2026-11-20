@@ -34,9 +34,6 @@ jobs:
           echo "ORG_GRADLE_PROJECT_releaseKeyAlias=$ANDROID_KEY_ALIAS" >> "$GITHUB_ENV"
           echo "ORG_GRADLE_PROJECT_releaseKeyPassword=$ANDROID_KEY_PASSWORD" >> "$GITHUB_ENV"
       - name: Build signed release APK
-        env:
-          AMBIENT_CLIENT_ID: ${{ secrets.AMBIENT_CLIENT_ID }}
-          AMBIENT_CLIENT_SECRET: ${{ secrets.AMBIENT_CLIENT_SECRET }}
         run: ./gradlew --no-daemon assembleRelease
       - name: Publish public GitHub Release
         env:
