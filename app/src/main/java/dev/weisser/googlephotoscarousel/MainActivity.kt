@@ -13,12 +13,15 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
@@ -40,6 +43,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalDensity
 import androidx.lifecycle.lifecycleScope
 import coil.compose.AsyncImage
 import com.google.zxing.BarcodeFormat
@@ -93,6 +97,7 @@ class MainActivity : ComponentActivity() {
             var seconds by remember { mutableIntStateOf(prefs.getInt("seconds", 8)) }
             var shuffle by remember { mutableStateOf(prefs.getBoolean("shuffle", false)) }
             var orientation by remember { mutableIntStateOf(prefs.getInt("orientation", 0)) }
+            var panZoom by remember { mutableStateOf(prefs.getBoolean("pan_zoom", false)) }
             var playing by remember { mutableStateOf(false) }
             var index by remember { mutableIntStateOf(0) }
             var showSettings by remember { mutableStateOf(false) }
@@ -138,7 +143,7 @@ class MainActivity : ComponentActivity() {
 
                 Box(Modifier.fillMaxSize().background(Ink)) {
                     if (playing && images.isNotEmpty()) {
-                        PlaybackView(images, index, orientation, playing, onPause = { playing = false }, onNext = { index = (index + 1) % images.size }, onPrevious = { index = (index - 1 + images.size) % images.size })
+                        PlaybackView(images, index, orientation, panZoom, seconds, playing, onPause = { playing = false }, onNext = { index = (index + 1) % images.size }, onPrevious = { index = (index - 1 + images.size) % images.size })
                     } else {
                         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(horizontal = 24.dp)) {
                             Row(Modifier.fillMaxWidth().padding(top = 18.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -200,7 +205,7 @@ class MainActivity : ComponentActivity() {
                     }
                     (googleError ?: message)?.let { text -> AlertDialog(onDismissRequest = { googleError = null; message = null }, title = { Text("Hinweis") }, text = { Text(text) }, confirmButton = { TextButton(onClick = { googleError = null; message = null }) { Text("OK") } }) }
                     if (showSettings) {
-                        SettingsDialog(seconds, orientation, onSeconds = { seconds = it; prefs.edit().putInt("seconds", it).apply() }, onOrientation = { orientation = it; prefs.edit().putInt("orientation", it).apply() }, onClose = { showSettings = false })
+                        SettingsDialog(seconds, orientation, panZoom, onSeconds = { seconds = it; prefs.edit().putInt("seconds", it).apply() }, onOrientation = { orientation = it; prefs.edit().putInt("orientation", it).apply() }, onPanZoom = { panZoom = it; prefs.edit().putBoolean("pan_zoom", it).apply() }, onClose = { showSettings = false })
                     }
                 }
             }
@@ -282,10 +287,35 @@ private fun EmptyState(onLocal: () -> Unit, onGoogle: () -> Unit) {
 
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
-private fun PlaybackView(images: List<String>, index: Int, rotation: Int, playing: Boolean, onPause: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit) {
-    Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
-        AnimatedContent(targetState = images[index], transitionSpec = { fadeIn(tween(700)) togetherWith fadeOut(tween(700)) }, label = "photo-fade") { model ->
-            AsyncImage(model = model.removePrefix("uri:").removePrefix("file:"), contentDescription = "Slideshow Foto", modifier = Modifier.fillMaxSize().padding(18.dp).graphicsLayer(rotationZ = rotation.toFloat()), contentScale = ContentScale.Fit)
+private fun PlaybackView(images: List<String>, index: Int, rotation: Int, panZoom: Boolean, seconds: Int, playing: Boolean, onPause: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit) {
+    BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+        val model = images[index].removePrefix("uri:").removePrefix("file:")
+        var sourceLandscape by remember(model) { mutableStateOf(false) }
+        val panX = remember { Animatable(0f) }
+        val density = LocalDensity.current
+        val panEnabled = panZoom && sourceLandscape && (rotation == 90 || rotation == 270)
+        LaunchedEffect(index, panEnabled, playing, seconds, maxWidth) {
+            if (panEnabled && playing) {
+                panX.snapTo(0f)
+                panX.animateTo(with(density) { -maxWidth.toPx() * 0.18f }, tween(seconds * 1000, easing = LinearEasing))
+            } else panX.snapTo(0f)
+        }
+        AnimatedContent(targetState = model, transitionSpec = { fadeIn(tween(700)) togetherWith fadeOut(tween(700)) }, label = "photo-fade") { photo ->
+            AsyncImage(
+                model = photo,
+                contentDescription = "Slideshow Foto",
+                onSuccess = { state -> sourceLandscape = state.result.drawable.intrinsicWidth > state.result.drawable.intrinsicHeight },
+                modifier = Modifier.fillMaxSize().then(if (panEnabled) Modifier.clipToBounds() else Modifier.padding(18.dp))
+                    .graphicsLayer {
+                        rotationZ = rotation.toFloat()
+                        if (panEnabled) {
+                            scaleX = 1.2f
+                            scaleY = 1.2f
+                            translationX = panX.value
+                        }
+                    },
+                contentScale = if (panEnabled) ContentScale.Crop else ContentScale.Fit
+            )
         }
         Row(Modifier.align(Alignment.BottomCenter).padding(bottom = 24.dp).clip(RoundedCornerShape(24.dp)).background(Color(0x990E1116)).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onPrevious) { Icon(Icons.Default.SkipPrevious, "Vorheriges Bild", tint = Color.White) }
@@ -297,7 +327,7 @@ private fun PlaybackView(images: List<String>, index: Int, rotation: Int, playin
 }
 
 @Composable
-private fun SettingsDialog(seconds: Int, orientation: Int, onSeconds: (Int) -> Unit, onOrientation: (Int) -> Unit, onClose: () -> Unit) {
+private fun SettingsDialog(seconds: Int, orientation: Int, panZoom: Boolean, onSeconds: (Int) -> Unit, onOrientation: (Int) -> Unit, onPanZoom: (Boolean) -> Unit, onClose: () -> Unit) {
     AlertDialog(onDismissRequest = onClose, title = { Text("Bild & Bildschirm") }, text = {
         Column {
             Text("Bildrichtung", fontWeight = FontWeight.SemiBold)
@@ -308,6 +338,14 @@ private fun SettingsDialog(seconds: Int, orientation: Int, onSeconds: (Int) -> U
                 }
             }
             Text("Drehung für die Anzeige; Originaldateien bleiben unverändert.", fontSize = 12.sp, color = Color.Gray)
+            Spacer(Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Schwenken & Zoomen", fontWeight = FontWeight.SemiBold)
+                    Text("Querformatfotos fahren im Portrait langsam von links nach rechts.", fontSize = 12.sp, color = Color.Gray)
+                }
+                Switch(checked = panZoom, onCheckedChange = onPanZoom)
+            }
             Spacer(Modifier.height(18.dp))
             Text("Bilddauer · ${seconds}s", fontWeight = FontWeight.SemiBold)
             Slider(value = seconds.toFloat(), onValueChange = { onSeconds(it.toInt().coerceIn(3, 60)) }, valueRange = 3f..60f)
