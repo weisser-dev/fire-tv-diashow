@@ -1,9 +1,6 @@
 package dev.weisser.googlephotoscarousel
 
 import android.content.Context
-import android.security.keystore.KeyGenParameterSpec
-import android.security.keystore.KeyProperties
-import android.util.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -14,12 +11,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.MediaType.Companion.toMediaType
 import org.json.JSONObject
 import java.io.File
-import java.security.KeyStore
 import java.util.UUID
-import javax.crypto.Cipher
-import javax.crypto.KeyGenerator
-import javax.crypto.SecretKey
-import javax.crypto.spec.GCMParameterSpec
 import java.util.concurrent.TimeUnit
 
 /** OAuth device flow and media source access for Google Photos Ambient API. */
@@ -51,9 +43,9 @@ class AmbientRepository(context: Context) {
             val response = http.newCall(req).execute().use { it.code to it.body?.string().orEmpty() }
             val json = JSONObject(response.second)
             if (response.first in 200..299) {
-                val token = json.getString("access_token")
-                json.optString("refresh_token").takeIf { it.isNotBlank() }?.let(::saveSecret)
-                return@withContext token
+                // The app currently uses the access token only for this connection flow.
+                // Do not persist an unused refresh token; Android 5.1 has no AES AndroidKeyStore provider.
+                return@withContext json.getString("access_token")
             }
             when (json.optString("error")) {
                 "authorization_pending" -> onStatus("Warte auf Bestätigung am Handy …")
@@ -132,9 +124,6 @@ class AmbientRepository(context: Context) {
 
     fun settingsUri() = prefs.getString("settings_uri", null)
     fun clearDevice() { prefs.edit().remove("device_id").remove("request_id").remove("settings_uri").remove("refresh_token").apply() }
-    private fun saveSecret(value: String) { val cipher = Cipher.getInstance("AES/GCM/NoPadding"); cipher.init(Cipher.ENCRYPT_MODE, secretKey()); val encrypted = cipher.doFinal(value.toByteArray()); prefs.edit().putString("refresh_token", Base64.encodeToString(cipher.iv + encrypted, Base64.NO_WRAP)).apply() }
-    @Suppress("unused") private fun loadSecret(): String? = runCatching { val all = Base64.decode(prefs.getString("refresh_token", null), Base64.NO_WRAP); val cipher = Cipher.getInstance("AES/GCM/NoPadding"); cipher.init(Cipher.DECRYPT_MODE, secretKey(), GCMParameterSpec(128, all.copyOfRange(0, 12))); String(cipher.doFinal(all.copyOfRange(12, all.size))) }.getOrNull()
-    private fun secretKey(): SecretKey { val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }; (ks.getKey("ambient-token", null) as? SecretKey)?.let { return it }; return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").apply { init(KeyGenParameterSpec.Builder("ambient-token", KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT).setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build()) }.generateKey() }
     private val JSON = "application/json; charset=utf-8".toMediaType()
 }
 
