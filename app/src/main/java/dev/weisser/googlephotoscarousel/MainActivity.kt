@@ -26,10 +26,12 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -47,6 +49,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -81,6 +84,7 @@ class MainActivity : ComponentActivity() {
     private var importJob: Job? = null
     private var googleFlowJob: Job? = null
     private var remoteKeyHandler: ((Int) -> Boolean)? = null
+    private val remoteHandledKeys = mutableSetOf<Int>()
     private var updateRelease by mutableStateOf<AppRelease?>(null)
     private var downloadedUpdate by mutableStateOf<File?>(null)
     private var updateBusy by mutableStateOf(false)
@@ -89,6 +93,11 @@ class MainActivity : ComponentActivity() {
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         val mapped = mapRemoteDirection(event.keyCode, displayDirectionForKeys)
+        if (event.action == KeyEvent.ACTION_DOWN && remoteKeyHandler?.invoke(mapped) == true) {
+            remoteHandledKeys += mapped
+            return true
+        }
+        if (event.action == KeyEvent.ACTION_UP && remoteHandledKeys.remove(mapped)) return true
         if (mapped == event.keyCode) return super.dispatchKeyEvent(event)
         val remappedEvent = KeyEvent(
             event.downTime, event.eventTime, event.action, mapped, event.repeatCount,
@@ -123,7 +132,6 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        if (remoteKeyHandler?.invoke(keyCode) == true) return true
         return super.onKeyDown(keyCode, event)
     }
 
@@ -156,22 +164,131 @@ class MainActivity : ComponentActivity() {
             var playing by remember { mutableStateOf(false) }
             var index by remember { mutableIntStateOf(0) }
             var showSettings by remember { mutableStateOf(false) }
+            var setupConfirmSelected by remember { mutableStateOf(false) }
+            var qrDoneSelected by remember { mutableStateOf(false) }
+            var sourceCardFocus by remember { mutableIntStateOf(-1) }
+            var focusedSettingsNode by remember { mutableIntStateOf(0) }
             var rotationBeforeSettings by remember { mutableIntStateOf(displayRotation) }
             var message by remember { mutableStateOf<String?>(null) }
             val context = LocalContext.current
+            val focusManager = LocalFocusManager.current
             val settingsFocusRequester = remember { FocusRequester() }
+            val localSourceFocusRequester = remember { FocusRequester() }
+            val googleSourceFocusRequester = remember { FocusRequester() }
             var settingsButtonFocused by remember { mutableStateOf(false) }
             val images = remember(localPhotos, importedFiles) { (localPhotos.map { "uri:$it" } + importedFiles.map { "file:$it" }).distinct() }
 
             MaterialTheme(colorScheme = darkColorScheme(primary = Accent, background = Ink, surface = SurfaceCard, onBackground = Color.White, onSurface = Color.White)) {
-                DisposableEffect(playing, images.size) {
-                    remoteKeyHandler = { code ->
-                        if (!playing || images.isEmpty()) false else when (code) {
-                            KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_MEDIA_NEXT -> { index = (index + 1) % images.size; true }
-                            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_MEDIA_PREVIOUS -> { index = (index - 1 + images.size) % images.size; true }
-                            KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_SPACE, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> { playing = !playing; true }
-                            else -> false
+                DisposableEffect(playing, images.size, orientationChosen, displayRotation, setupConfirmSelected, sourceCardFocus, focusedSettingsNode, showSettings, pickerUri, googleError, message) {
+                    remoteKeyHandler = when {
+                        !orientationChosen -> { code ->
+                            when (code) {
+                                KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_DOWN -> { setupConfirmSelected = true; true }
+                                KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_UP -> { setupConfirmSelected = false; true }
+                                KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_SPACE -> {
+                                    if (setupConfirmSelected) {
+                                        prefs.edit().putInt("display_rotation", displayRotation).apply()
+                                        orientationChosen = true
+                                    } else {
+                                        displayRotation = nextDisplayRotation(displayRotation)
+                                        displayDirectionForKeys = displayRotation
+                                        setupConfirmSelected = false
+                                    }
+                                    true
+                                }
+                                else -> false
+                            }
                         }
+                        googleError != null || message != null -> { code ->
+                            when (code) {
+                                KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_DOWN,
+                                KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_UP -> true
+                                KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_SPACE -> { googleError = null; message = null; true }
+                                else -> false
+                            }
+                        }
+                        pickerUri != null -> { code ->
+                            when (code) {
+                                KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_DOWN -> { qrDoneSelected = true; true }
+                                KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_UP -> { qrDoneSelected = false; true }
+                                KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_SPACE -> {
+                                    if (qrDoneSelected) pickerUri = null else cancelGooglePicker()
+                                    true
+                                }
+                                else -> false
+                            }
+                        }
+                        showSettings -> { code ->
+                            when (code) {
+                                KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                                    when (focusedSettingsNode) {
+                                        0 -> focusedSettingsNode = 1
+                                        in 2..4 -> focusedSettingsNode++
+                                        7 -> seconds = (seconds + 1).coerceAtMost(60)
+                                    }
+                                    if (focusedSettingsNode == 7) prefs.edit().putInt("seconds", seconds).apply()
+                                    true
+                                }
+                                KeyEvent.KEYCODE_DPAD_LEFT -> {
+                                    when (focusedSettingsNode) {
+                                        1 -> focusedSettingsNode = 0
+                                        in 3..5 -> focusedSettingsNode--
+                                        7 -> seconds = (seconds - 1).coerceAtLeast(3)
+                                    }
+                                    if (focusedSettingsNode == 7) prefs.edit().putInt("seconds", seconds).apply()
+                                    true
+                                }
+                                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                                    focusedSettingsNode = when (focusedSettingsNode) {
+                                        0, 1 -> 2
+                                        in 2..5 -> 6
+                                        6 -> 7
+                                        else -> 7
+                                    }
+                                    true
+                                }
+                                KeyEvent.KEYCODE_DPAD_UP -> {
+                                    focusedSettingsNode = when (focusedSettingsNode) {
+                                        in 2..5 -> 0
+                                        6 -> 2
+                                        7 -> 6
+                                        else -> 0
+                                    }
+                                    true
+                                }
+                                KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_SPACE -> {
+                                    when (focusedSettingsNode) {
+                                        0 -> { displayRotation = nextDisplayRotation(displayRotation); displayDirectionForKeys = displayRotation }
+                                        1 -> { prefs.edit().putInt("display_rotation", displayRotation).apply(); showSettings = false }
+                                        in 2..5 -> { orientation = (focusedSettingsNode - 2) * 90; prefs.edit().putInt("orientation", orientation).apply() }
+                                        6 -> { panZoom = !panZoom; prefs.edit().putBoolean("pan_zoom", panZoom).apply() }
+                                        7 -> { seconds = if (seconds >= 60) 3 else seconds + 1; prefs.edit().putInt("seconds", seconds).apply() }
+                                    }
+                                    true
+                                }
+                                else -> false
+                            }
+                        }
+                        orientationChosen && !playing && sourceCardFocus in 0..1 -> { code ->
+                            when (code) {
+                                KeyEvent.KEYCODE_DPAD_RIGHT -> { if (sourceCardFocus == 0) googleSourceFocusRequester.requestFocus(); true }
+                                KeyEvent.KEYCODE_DPAD_LEFT -> { if (sourceCardFocus == 1) localSourceFocusRequester.requestFocus(); true }
+                                KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_SPACE -> {
+                                    if (sourceCardFocus == 0) photoChooser.launch(arrayOf("image/*")) else requestGoogleAccess()
+                                    true
+                                }
+                                else -> false
+                            }
+                        }
+                        playing && images.isNotEmpty() -> { code ->
+                            when (code) {
+                                KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_MEDIA_NEXT -> { index = (index + 1) % images.size; true }
+                                KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_MEDIA_PREVIOUS -> { index = (index - 1 + images.size) % images.size; true }
+                                KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_SPACE, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> { playing = !playing; true }
+                                else -> false
+                            }
+                        }
+                        else -> null
                     }
                     onDispose { remoteKeyHandler = null }
                 }
@@ -202,11 +319,23 @@ class MainActivity : ComponentActivity() {
                     showSettings = false
                 }
                 BackHandler(pickerUri != null) { cancelGooglePicker() }
-                BackHandler(!orientationChosen) { }
+                BackHandler(!orientationChosen) {
+                    displayRotation = 0
+                    displayDirectionForKeys = 0
+                    prefs.edit().putInt("display_rotation", 0).apply()
+                    orientationChosen = true
+                }
+                BackHandler(googleError != null || message != null) { googleError = null; message = null }
                 LaunchedEffect(showSettings, orientationChosen) {
                     if (!showSettings && orientationChosen) {
                         delay(100)
-                        runCatching { settingsFocusRequester.requestFocus() }
+                        runCatching { localSourceFocusRequester.requestFocus() }
+                    }
+                }
+                LaunchedEffect(showSettings, pickerUri, googleError, message, orientationChosen) {
+                    if (showSettings || pickerUri != null || googleError != null || message != null || !orientationChosen) {
+                        delay(40)
+                        focusManager.clearFocus(force = true)
                     }
                 }
 
@@ -214,15 +343,22 @@ class MainActivity : ComponentActivity() {
                     val swapsDimensions = displayRotation == 90 || displayRotation == 270
                     Box(
                         Modifier
-                            .width(if (swapsDimensions) maxHeight else maxWidth)
-                            .height(if (swapsDimensions) maxWidth else maxHeight)
+                            .requiredSize(
+                                width = if (swapsDimensions) maxHeight else maxWidth,
+                                height = if (swapsDimensions) maxWidth else maxHeight
+                            )
                             .graphicsLayer { rotationZ = displayRotation.toFloat() }
                             .background(Ink)
                     ) {
+                    val modalVisible = showSettings || pickerUri != null || googleError != null || message != null || !orientationChosen
                     if (playing && images.isNotEmpty()) {
                         PlaybackView(images, index, orientation, panZoom, seconds, playing, onPause = { playing = false }, onNext = { index = (index + 1) % images.size }, onPrevious = { index = (index - 1 + images.size) % images.size })
+                    } else if (modalVisible) {
+                        Spacer(Modifier.fillMaxSize().background(Ink))
                     } else {
-                        Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(horizontal = 24.dp)) {
+                        Column(
+                            Modifier.fillMaxSize().focusProperties { canFocus = !modalVisible }.padding(horizontal = 24.dp)
+                        ) {
                             Row(Modifier.fillMaxWidth().padding(top = 18.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
                                     Text("STILLFRAME", color = Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
@@ -235,6 +371,7 @@ class MainActivity : ComponentActivity() {
                                         .then(if (settingsButtonFocused) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(14.dp)) else Modifier),
                                     onClick = {
                                         rotationBeforeSettings = displayRotation
+                                        focusedSettingsNode = 0
                                         showSettings = true
                                     }
                                 ) { Icon(Icons.Default.Tune, "Einstellungen", tint = Color.White) }
@@ -259,9 +396,9 @@ class MainActivity : ComponentActivity() {
                             Spacer(Modifier.height(22.dp))
                             Text("QUELLE WÄHLEN", color = Color(0xFF9DA8B6), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
                             Spacer(Modifier.height(10.dp))
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                SourceCard("Local images", "Fotos von diesem Gerät", Icons.Default.FolderOpen, Modifier.weight(1f), count = localPhotos.size, onClick = { photoChooser.launch(arrayOf("image/*")) })
-                                SourceCard("Google Fotos", "Sicher per QR auswählen", Icons.Default.Cloud, Modifier.weight(1f), count = importedFiles.size, onClick = { requestGoogleAccess() })
+                            Row(Modifier.fillMaxWidth().focusGroup(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                SourceCard("Local images", "Fotos von diesem Gerät", Icons.Default.FolderOpen, Modifier.weight(1f).focusRequester(localSourceFocusRequester), count = localPhotos.size, onClick = { photoChooser.launch(arrayOf("image/*")) }, onFocusChange = { if (it) sourceCardFocus = 0 else if (sourceCardFocus == 0) sourceCardFocus = -1 })
+                                SourceCard("Google Fotos", "Sicher per QR auswählen", Icons.Default.Cloud, Modifier.weight(1f).focusRequester(googleSourceFocusRequester), count = importedFiles.size, onClick = { requestGoogleAccess() }, onFocusChange = { if (it) sourceCardFocus = 1 else if (sourceCardFocus == 1) sourceCardFocus = -1 })
                             }
                             if (isImporting) {
                                 LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 12.dp), color = Accent)
@@ -276,7 +413,7 @@ class MainActivity : ComponentActivity() {
                                 if (images.isNotEmpty()) TextButton(onClick = { clearPhotos() }) { Text("Leeren", color = Color(0xFFADB7C4)) }
                             }
                             Spacer(Modifier.height(12.dp))
-                            if (images.isEmpty()) EmptyState(onLocal = { photoChooser.launch(arrayOf("image/*")) }, onGoogle = { requestGoogleAccess() })
+                            if (images.isEmpty()) EmptyState()
                             else {
                                 LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 8.dp)) {
                                     itemsIndexed(images) { i, model ->
@@ -306,9 +443,12 @@ class MainActivity : ComponentActivity() {
                     if (!orientationChosen) {
                         DisplayDirectionSetup(
                             rotation = displayRotation,
+                            confirmSelected = setupConfirmSelected,
+                            onConfirmSelected = { setupConfirmSelected = it },
                             onRotate = {
                                 displayRotation = nextDisplayRotation(displayRotation)
                                 displayDirectionForKeys = displayRotation
+                                setupConfirmSelected = false
                             },
                             onConfirm = {
                                 prefs.edit().putInt("display_rotation", displayRotation).apply()
@@ -317,12 +457,12 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                     pickerUri?.let { url ->
-                        PickerQrDialog(url, googleUserCode, importStatus, onCancel = { cancelGooglePicker() }, onDone = { pickerUri = null })
+                        PickerQrDialog(url, googleUserCode, importStatus, qrDoneSelected, onCancel = { cancelGooglePicker() }, onDone = { pickerUri = null })
                     }
                     (googleError ?: message)?.let { text -> InlineMessageDialog(text) { googleError = null; message = null } }
                     if (showSettings) {
                         SettingsDialog(
-                            seconds, orientation, panZoom, displayRotation,
+                            seconds, orientation, panZoom, displayRotation, focusedSettingsNode,
                             onSeconds = { seconds = it; prefs.edit().putInt("seconds", it).apply() },
                             onOrientation = { orientation = it; prefs.edit().putInt("orientation", it).apply() },
                             onPanZoom = { panZoom = it; prefs.edit().putBoolean("pan_zoom", it).apply() },
@@ -432,7 +572,12 @@ class MainActivity : ComponentActivity() {
                 getSharedPreferences("carousel", MODE_PRIVATE).edit().putStringSet("google_photos", paths.toSet()).apply()
                 isImporting = false; importStatus = "${paths.size} Fotos übernommen."; pickerUri = null
             }.onFailure {
-                isImporting = false; pickerUri = null; googleError = it.localizedMessage ?: "Google Fotos konnte nicht verbunden werden."
+                isImporting = false
+                pickerUri = null
+                val detail = it.localizedMessage.orEmpty()
+                googleError = if (detail.contains("permission", ignoreCase = true) || detail.contains("PERMISSION_DENIED", ignoreCase = true)) {
+                    "Google hat den Zugriff auf die Ambient API für dieses Projekt noch nicht freigegeben. Laut Google muss das Projekt zuerst ins Google Photos Partner Program aufgenommen werden. OAuth-Client und API-Aktivierung allein reichen nicht.\n\nAntrag: developers.google.com/photos/partner-program/overview"
+                } else detail.ifBlank { "Google Fotos konnte nicht verbunden werden." }
             }
         }
     }
@@ -458,14 +603,14 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun SourceCard(title: String, subtitle: String, icon: androidx.compose.ui.graphics.vector.ImageVector, modifier: Modifier, count: Int, onClick: () -> Unit) {
+private fun SourceCard(title: String, subtitle: String, icon: androidx.compose.ui.graphics.vector.ImageVector, modifier: Modifier, count: Int, onClick: () -> Unit, onFocusChange: (Boolean) -> Unit) {
     var focused by remember { mutableStateOf(false) }
     Column(
         modifier
+            .onFocusChanged { focused = it.isFocused; onFocusChange(it.isFocused) }
             .clip(RoundedCornerShape(18.dp))
             .background(if (focused) RemoteFocusSurface else SurfaceCard)
             .clickable(onClick = onClick)
-            .onFocusChanged { focused = it.isFocused }
             .then(if (focused) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(18.dp)) else Modifier)
             .padding(16.dp)
     ) {
@@ -478,17 +623,13 @@ private fun SourceCard(title: String, subtitle: String, icon: androidx.compose.u
 }
 
 @Composable
-private fun EmptyState(onLocal: () -> Unit, onGoogle: () -> Unit) {
+private fun EmptyState() {
     Column(Modifier.fillMaxWidth().heightIn(min = 220.dp).clip(RoundedCornerShape(20.dp)).background(SurfaceCard).padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         Icon(Icons.Default.PhotoLibrary, null, tint = Accent, modifier = Modifier.size(50.dp))
         Spacer(Modifier.height(12.dp))
         Text("Deine Erinnerungen verdienen\neine große Leinwand.", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center)
         Text("Wähle lokale Bilder oder stelle eine Auswahl in Google Fotos zusammen.", color = Color(0xFFADB7C4), fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp))
         Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(onClick = onLocal) { Text("Local images", color = Accent) }
-            TextButton(onClick = onGoogle) { Text("Google Fotos", color = Accent) }
-        }
     }
 }
 
@@ -541,20 +682,14 @@ private fun SettingsDialog(
     orientation: Int,
     panZoom: Boolean,
     displayRotation: Int,
+    focusedSettingsNode: Int,
     onSeconds: (Int) -> Unit,
     onOrientation: (Int) -> Unit,
     onPanZoom: (Boolean) -> Unit,
     onRotateDisplay: () -> Unit,
     onConfirmDisplay: () -> Unit
 ) {
-    val rotateRequester = remember { FocusRequester() }
-    var rotateFocused by remember { mutableStateOf(false) }
-    var confirmFocused by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        delay(120)
-        runCatching { rotateRequester.requestFocus() }
-    }
-    Box(Modifier.fillMaxSize().background(Color(0xCC000000)), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize().background(Color(0xCC000000)).focusGroup(), contentAlignment = Alignment.Center) {
         Surface(Modifier.fillMaxWidth().widthIn(max = 620.dp).heightIn(max = 700.dp), color = SurfaceCard, shape = RoundedCornerShape(24.dp)) {
             Column(Modifier.verticalScroll(rememberScrollState()).padding(24.dp)) {
                 Text("Bild & Bildschirm", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
@@ -566,12 +701,11 @@ private fun SettingsDialog(
                     OutlinedButton(
                         onClick = onRotateDisplay,
                         modifier = Modifier.weight(1f)
-                            .focusRequester(rotateRequester)
-                            .onFocusChanged { rotateFocused = it.isFocused }
-                            .then(if (rotateFocused) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(14.dp)) else Modifier),
+                            .focusProperties { canFocus = false }
+                            .then(if (focusedSettingsNode == 0) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(14.dp)) else Modifier),
                         colors = ButtonDefaults.outlinedButtonColors(
-                            containerColor = if (rotateFocused) RemoteFocusSurface else Color.Transparent,
-                            contentColor = if (rotateFocused) Color.White else Accent
+                            containerColor = if (focusedSettingsNode == 0) RemoteFocusSurface else Color.Transparent,
+                            contentColor = if (focusedSettingsNode == 0) Color.White else Accent
                         )
                     ) {
                         Icon(Icons.Default.Rotate90DegreesCw, null)
@@ -581,11 +715,11 @@ private fun SettingsDialog(
                     Button(
                         onClick = onConfirmDisplay,
                         modifier = Modifier.weight(1f)
-                            .onFocusChanged { confirmFocused = it.isFocused }
-                            .then(if (confirmFocused) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(14.dp)) else Modifier),
+                            .focusProperties { canFocus = false }
+                            .then(if (focusedSettingsNode == 1) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(14.dp)) else Modifier),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = if (confirmFocused) RemoteFocusSurface else Accent,
-                            contentColor = if (confirmFocused) Color.White else Ink
+                            containerColor = if (focusedSettingsNode == 1) RemoteFocusSurface else Accent,
+                            contentColor = if (focusedSettingsNode == 1) Color.White else Ink
                         )
                     ) { Text("Bestätigen") }
                 }
@@ -593,11 +727,10 @@ private fun SettingsDialog(
                 Text("Bilddrehung", fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(0, 90, 180, 270).forEach { deg ->
-                        var focused by remember(deg) { mutableStateOf(false) }
+                    listOf(0, 90, 180, 270).forEachIndexed { i, deg ->
                         FilterChip(
-                            modifier = Modifier.onFocusChanged { focused = it.isFocused }
-                                .then(if (focused) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(12.dp)) else Modifier),
+                            modifier = Modifier.focusProperties { canFocus = false }
+                                .then(if (focusedSettingsNode == i + 2) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(12.dp)) else Modifier),
                             selected = orientation == deg,
                             onClick = { onOrientation(deg) },
                             label = { Text("${deg}°") },
@@ -617,23 +750,21 @@ private fun SettingsDialog(
                         Text("Schwenken & Zoomen", fontWeight = FontWeight.SemiBold)
                         Text("Dezenter Schwenk: Bei 5 s Bilddauer bewegt sich das Bild nur leicht. Eine ganze Schwenkbewegung dauert mindestens 15 s.", fontSize = 12.sp, color = Color.Gray)
                     }
-                    var switchFocused by remember { mutableStateOf(false) }
                     Switch(
                         checked = panZoom,
                         onCheckedChange = onPanZoom,
-                        modifier = Modifier.onFocusChanged { switchFocused = it.isFocused }
-                            .then(if (switchFocused) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(24.dp)) else Modifier)
+                        modifier = Modifier.focusProperties { canFocus = false }
+                            .then(if (focusedSettingsNode == 6) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(24.dp)) else Modifier)
                     )
                 }
                 Spacer(Modifier.height(14.dp))
                 Text("Bilddauer · ${seconds}s", fontWeight = FontWeight.SemiBold)
-                var sliderFocused by remember { mutableStateOf(false) }
                 Slider(
                     value = seconds.toFloat(),
                     onValueChange = { onSeconds(it.toInt().coerceIn(3, 60)) },
                     valueRange = 3f..60f,
-                    modifier = Modifier.onFocusChanged { sliderFocused = it.isFocused }
-                        .then(if (sliderFocused) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(12.dp)) else Modifier)
+                    modifier = Modifier.focusProperties { canFocus = false }
+                        .then(if (focusedSettingsNode == 7) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(12.dp)) else Modifier)
                 )
             }
         }
@@ -641,15 +772,15 @@ private fun SettingsDialog(
 }
 
 @Composable
-private fun DisplayDirectionSetup(rotation: Int, onRotate: () -> Unit, onConfirm: () -> Unit) {
+private fun DisplayDirectionSetup(rotation: Int, confirmSelected: Boolean, onConfirmSelected: (Boolean) -> Unit, onRotate: () -> Unit, onConfirm: () -> Unit) {
     val rotateRequester = remember { FocusRequester() }
     var rotateFocused by remember { mutableStateOf(false) }
     var confirmFocused by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
+    LaunchedEffect(rotation) {
         delay(120)
         runCatching { rotateRequester.requestFocus() }
     }
-    Box(Modifier.fillMaxSize().background(Color(0xCC000000)), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize().background(Color(0xCC000000)).focusGroup(), contentAlignment = Alignment.Center) {
         Surface(Modifier.fillMaxWidth().widthIn(max = 680.dp), color = SurfaceCard, shape = RoundedCornerShape(24.dp)) {
             Column(Modifier.padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("Displayausrichtung", color = Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
@@ -662,8 +793,8 @@ private fun DisplayDirectionSetup(rotation: Int, onRotate: () -> Unit, onConfirm
                         onClick = onRotate,
                         modifier = Modifier.weight(1f)
                             .focusRequester(rotateRequester)
-                            .onFocusChanged { rotateFocused = it.isFocused }
-                            .then(if (rotateFocused) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(14.dp)) else Modifier),
+                            .onFocusChanged { rotateFocused = it.isFocused; if (it.isFocused) onConfirmSelected(false) }
+                            .then(if (!confirmSelected) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(14.dp)) else Modifier),
                         colors = ButtonDefaults.outlinedButtonColors(
                             containerColor = if (rotateFocused) RemoteFocusSurface else Color.Transparent,
                             contentColor = if (rotateFocused) Color.White else Accent
@@ -676,8 +807,8 @@ private fun DisplayDirectionSetup(rotation: Int, onRotate: () -> Unit, onConfirm
                     Button(
                         onClick = onConfirm,
                         modifier = Modifier.weight(1f)
-                            .onFocusChanged { confirmFocused = it.isFocused }
-                            .then(if (confirmFocused) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(14.dp)) else Modifier),
+                            .onFocusChanged { confirmFocused = it.isFocused; if (it.isFocused) onConfirmSelected(true) }
+                            .then(if (confirmSelected) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(14.dp)) else Modifier),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = if (confirmFocused) RemoteFocusSurface else Accent,
                             contentColor = if (confirmFocused) Color.White else Ink
@@ -705,19 +836,31 @@ private fun nextDisplayRotation(degrees: Int): Int = when (degrees) {
 
 @Composable
 private fun InlineMessageDialog(message: String, onClose: () -> Unit) {
-    Box(Modifier.fillMaxSize().background(Color(0xCC000000)), contentAlignment = Alignment.Center) {
+    val okRequester = remember { FocusRequester() }
+    var okFocused by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { delay(120); runCatching { okRequester.requestFocus() } }
+    Box(Modifier.fillMaxSize().background(Color(0xCC000000)).focusGroup(), contentAlignment = Alignment.Center) {
         Surface(Modifier.fillMaxWidth().widthIn(max = 520.dp), color = SurfaceCard, shape = RoundedCornerShape(20.dp)) {
             Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("Hinweis", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
                 Text(message, color = Color(0xFFCFD5DD), modifier = Modifier.padding(vertical = 16.dp), textAlign = TextAlign.Center)
-                Button(onClick = onClose) { Text("OK") }
+                Button(
+                    onClick = onClose,
+                    modifier = Modifier.focusRequester(okRequester).onFocusChanged { okFocused = it.isFocused }
+                        .then(if (okFocused) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(14.dp)) else Modifier),
+                    colors = ButtonDefaults.buttonColors(containerColor = if (okFocused) RemoteFocusSurface else Accent, contentColor = if (okFocused) Color.White else Ink)
+                ) { Text("OK") }
             }
         }
     }
 }
 
 @Composable
-private fun PickerQrDialog(uri: String, userCode: String, status: String, onCancel: () -> Unit, onDone: () -> Unit) {
+private fun PickerQrDialog(uri: String, userCode: String, status: String, doneSelected: Boolean, onCancel: () -> Unit, onDone: () -> Unit) {
+    val cancelRequester = remember { FocusRequester() }
+    var cancelFocused by remember { mutableStateOf(false) }
+    var doneFocused by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { delay(120); runCatching { cancelRequester.requestFocus() } }
     val bitmap = remember(uri) {
         runCatching {
             val matrix = QRCodeWriter().encode(uri, BarcodeFormat.QR_CODE, 640, 640)
@@ -726,19 +869,28 @@ private fun PickerQrDialog(uri: String, userCode: String, status: String, onCanc
             }.asImageBitmap()
         }.getOrNull()
     }
-    Box(Modifier.fillMaxSize().background(Color(0xCC000000)), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize().background(Color(0xCC000000)).focusGroup(), contentAlignment = Alignment.Center) {
         Surface(Modifier.fillMaxWidth().widthIn(max = 560.dp).heightIn(max = 900.dp), color = SurfaceCard, shape = RoundedCornerShape(24.dp)) {
             Column(Modifier.verticalScroll(rememberScrollState()).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("Mit Google Fotos verbinden", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-                Text(if (userCode.isNotBlank()) "Scanne den Code am Handy und gib dort diesen Code ein:" else "Scanne den Code mit deinem Handy und wähle in Google Fotos das Album für diesen Fernseher.", textAlign = TextAlign.Center, color = Color(0xFFCFD5DD), modifier = Modifier.padding(top = 12.dp))
+                Text(if (userCode.isNotBlank()) "Schritt 1 von 2: Scanne den Code am Handy und gib dort diesen Code ein. Danach erscheint hier ein zweiter Code für die Albumauswahl." else "Schritt 2 von 2: Scanne den Code mit deinem Handy und wähle in Google Fotos das Album für diesen Fernseher.", textAlign = TextAlign.Center, color = Color(0xFFCFD5DD), modifier = Modifier.padding(top = 12.dp))
                 if (userCode.isNotBlank()) Text(userCode, color = Accent, fontWeight = FontWeight.Bold, fontSize = 22.sp, modifier = Modifier.padding(top = 8.dp))
                 Spacer(Modifier.height(14.dp))
                 if (bitmap != null) Image(bitmap, "QR-Code für Google Photos Ambient", modifier = Modifier.size(220.dp))
                 Spacer(Modifier.height(8.dp))
                 Text(status.ifBlank { "Nach der Auswahl tippe auf Fertig." }, fontSize = 12.sp, color = Color.Gray, textAlign = TextAlign.Center)
                 Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = onCancel) { Text("Abbrechen") }
-                    Button(onClick = onDone) { Text("Fertig") }
+                    TextButton(
+                        onClick = onCancel,
+                        modifier = Modifier.focusRequester(cancelRequester).onFocusChanged { cancelFocused = it.isFocused }
+                            .then(if (cancelFocused || !doneSelected) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(12.dp)) else Modifier)
+                    ) { Text("Abbrechen", color = if (cancelFocused) RemoteFocus else Accent) }
+                    Button(
+                        onClick = onDone,
+                        modifier = Modifier.onFocusChanged { doneFocused = it.isFocused }
+                            .then(if (doneFocused || doneSelected) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(14.dp)) else Modifier),
+                        colors = ButtonDefaults.buttonColors(containerColor = if (doneFocused) RemoteFocusSurface else Accent, contentColor = if (doneFocused) Color.White else Ink)
+                    ) { Text("Fertig") }
                 }
             }
         }

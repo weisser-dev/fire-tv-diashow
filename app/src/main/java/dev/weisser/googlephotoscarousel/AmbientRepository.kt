@@ -25,9 +25,11 @@ class AmbientRepository(context: Context) {
     suspend fun requestDeviceCode(): DeviceCode = withContext(Dispatchers.IO) {
         check(isConfigured()) { "Google Ambient OAuth fehlt. Lege einen OAuth-Client vom Typ „TVs and Limited Input devices“ an und konfiguriere AMBIENT_CLIENT_ID sowie AMBIENT_CLIENT_SECRET." }
         val requestId = UUID.randomUUID().toString().also { prefs.edit().putString("request_id", it).apply() }
-        val state = JSONObject().put("requestId", requestId).put("displayName", "Photo Carousel").toString()
         val form = FormBody.Builder().add("client_id", BuildConfig.AMBIENT_CLIENT_ID)
-            .add("scope", "profile https://www.googleapis.com/auth/photosambient.mediaitems").add("state", state).build()
+            // Use Google's standard two-step flow. The streamlined `state` redirect can
+            // open Photos before the TV has created the device, leaving the phone at
+            // photos.google.com/c with a device-not-found error.
+            .add("scope", "profile https://www.googleapis.com/auth/photosambient.mediaitems").build()
         val json = call(Request.Builder().url("https://oauth2.googleapis.com/device/code").post(form).build())
         DeviceCode(json.getString("device_code"), json.getString("verification_url"), json.optString("user_code"), json.optLong("interval", 5), json.optLong("expires_in", 1800))
     }
