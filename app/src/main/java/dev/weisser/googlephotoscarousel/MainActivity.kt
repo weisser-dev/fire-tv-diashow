@@ -3,6 +3,8 @@ package dev.weisser.googlephotoscarousel
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.Build
+import android.provider.Settings
 import android.view.KeyEvent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -45,12 +47,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalDensity
 import androidx.lifecycle.lifecycleScope
+import androidx.core.content.FileProvider
 import coil.compose.AsyncImage
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import androidx.compose.ui.window.Dialog
 
@@ -69,6 +74,10 @@ class MainActivity : ComponentActivity() {
     private var importJob: Job? = null
     private var googleFlowJob: Job? = null
     private var remoteKeyHandler: ((Int) -> Boolean)? = null
+    private var updateRelease by mutableStateOf<AppRelease?>(null)
+    private var downloadedUpdate by mutableStateOf<File?>(null)
+    private var updateBusy by mutableStateOf(false)
+    private var updateStatus by mutableStateOf<String?>(null)
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         if (remoteKeyHandler?.invoke(keyCode) == true) return true
@@ -153,6 +162,23 @@ class MainActivity : ComponentActivity() {
                                 }
                                 IconButton(onClick = { showSettings = true }) { Icon(Icons.Default.Tune, "Einstellungen", tint = Color.White) }
                             }
+                            if (updateRelease != null || updateBusy || updateStatus != null) {
+                                Row(
+                                    Modifier.fillMaxWidth().padding(top = 12.dp).clip(RoundedCornerShape(14.dp)).background(Color(0xFF263240)).padding(horizontal = 14.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(updateStatus ?: "Neue Version verfügbar · ${updateRelease?.tag}", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                        if (updateBusy) Text("Update wird geladen …", color = Color(0xFFB8C1CC), fontSize = 12.sp)
+                                    }
+                                    if (!updateBusy) {
+                                        Button(onClick = { downloadOrInstallUpdate() }, colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Ink)) {
+                                            Text(if (downloadedUpdate == null) "Update" else "Installieren")
+                                        }
+                                    }
+                                }
+                            }
                             Spacer(Modifier.height(22.dp))
                             Text("QUELLE WÄHLEN", color = Color(0xFF9DA8B6), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
                             Spacer(Modifier.height(10.dp))
@@ -209,6 +235,74 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+        checkForUpdates()
+    }
+
+    private fun checkForUpdates() {
+        lifecycleScope.launch {
+            val prefs = getSharedPreferences("carousel", MODE_PRIVATE)
+            val cachedTag = prefs.getString("latest_release_tag", null)
+            if (cachedTag != null && ReleaseUpdater.isNewer(cachedTag, BuildConfig.VERSION_NAME)) {
+                updateRelease = AppRelease(cachedTag, "https://github.com/weisser-dev/google-photos-carousel/releases/download/$cachedTag/app-release.apk")
+            }
+            val now = System.currentTimeMillis()
+            val lastCheck = prefs.getLong("latest_release_checked_at", 0L)
+            if (now - lastCheck < 6 * 60 * 60 * 1000L) return@launch
+            val release = runCatching { withContext(Dispatchers.IO) { ReleaseUpdater.latest() } }.getOrNull()
+            if (release != null && ReleaseUpdater.isNewer(release.tag, BuildConfig.VERSION_NAME)) {
+                updateRelease = release
+                updateStatus = null
+            }
+            if (release != null) {
+                prefs.edit().putString("latest_release_tag", release.tag).putLong("latest_release_checked_at", now).apply()
+            }
+        }
+    }
+
+    private fun downloadOrInstallUpdate() {
+        val readyApk = downloadedUpdate
+        if (readyApk != null) {
+            installUpdate(readyApk)
+            return
+        }
+        val release = updateRelease ?: return
+        lifecycleScope.launch {
+            updateBusy = true
+            updateStatus = null
+            runCatching {
+                val apk = withContext(Dispatchers.IO) {
+                    ReleaseUpdater.download(release, File(cacheDir, "updates/app-release.apk"))
+                }
+                val info = packageManager.getPackageArchiveInfo(apk.absolutePath, 0)
+                    ?: error("Die heruntergeladene Datei ist keine gültige APK.")
+                val versionCode = if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else @Suppress("DEPRECATION") info.versionCode.toLong()
+                if (info.packageName != packageName || versionCode <= BuildConfig.VERSION_CODE) {
+                    error("Die APK passt nicht zu dieser App oder enthält kein neueres Update.")
+                }
+                downloadedUpdate = apk
+            }.onFailure { error ->
+                updateStatus = error.localizedMessage ?: "Das Update konnte nicht geladen werden."
+            }
+            updateBusy = false
+        }
+    }
+
+    private fun installUpdate(apk: File) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
+                updateStatus = "Erlaube Photo Carousel die Installation unbekannter Apps und tippe erneut auf Installieren."
+                startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+                return
+            }
+            val apkUri = FileProvider.getUriForFile(this, "$packageName.fileprovider", apk)
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(apkUri, "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(intent)
+        } catch (error: Exception) {
+            updateStatus = error.localizedMessage ?: "Der Android-Installationsdialog konnte nicht geöffnet werden."
         }
     }
 
