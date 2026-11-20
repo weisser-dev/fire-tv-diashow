@@ -11,6 +11,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.MediaType.Companion.toMediaType
 import org.json.JSONObject
 import java.io.File
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 /** Google Photos Picker API: OAuth device flow, remote selection, then durable local copies. */
@@ -25,7 +26,7 @@ class PickerRepository(context: Context) {
             .add("client_id", BuildConfig.AMBIENT_CLIENT_ID)
             .add("scope", "https://www.googleapis.com/auth/photospicker.mediaitems.readonly")
             .build()
-        val json = call(Request.Builder().url("https://oauth2.googleapis.com/device/code").post(form).build())
+        val json = call(Request.Builder().url("https://oauth2.googleapis.com/device/code").post(form).build(), "Google-Anmeldung")
         DeviceCode(json.getString("device_code"), json.getString("verification_url"), json.optString("user_code"), json.optLong("interval", 5), json.optLong("expires_in", 1800))
     }
 
@@ -51,9 +52,10 @@ class PickerRepository(context: Context) {
     }
 
     suspend fun createSession(token: String): PickerSession = withContext(Dispatchers.IO) {
-        val json = call(Request.Builder().url("https://photospicker.googleapis.com/v1/sessions")
+        val requestId = UUID.randomUUID().toString()
+        val json = call(Request.Builder().url("https://photospicker.googleapis.com/v1/sessions?requestId=$requestId")
             .header("Authorization", "Bearer $token")
-            .post("{}".toRequestBody(JSON)).build())
+            .post("{}".toRequestBody(JSON)).build(), "Google Photos Picker (Sitzung anlegen)")
         PickerSession(json.getString("id"), json.getString("pickerUri"), json.optJSONObject("pollingConfig")?.optString("pollInterval")?.removeSuffix("s")?.toLongOrNull() ?: 3L,
             json.optJSONObject("pollingConfig")?.optString("timeoutIn")?.removeSuffix("s")?.toLongOrNull() ?: 600L)
     }
@@ -64,7 +66,7 @@ class PickerRepository(context: Context) {
             var interval = session.pollSeconds.coerceIn(2, 30)
             while (System.currentTimeMillis() < deadline) {
                 val state = call(Request.Builder().url("https://photospicker.googleapis.com/v1/sessions/${session.id}")
-                    .header("Authorization", "Bearer $token").get().build())
+                    .header("Authorization", "Bearer $token").get().build(), "Google Photos Picker (Auswahl prüfen)")
                 if (state.optBoolean("mediaItemsSet")) return@withContext downloadMedia(token, session.id)
                 val config = state.optJSONObject("pollingConfig")
                 interval = config?.optString("pollInterval")?.removeSuffix("s")?.toLongOrNull()?.coerceIn(2, 30) ?: interval
@@ -91,7 +93,7 @@ class PickerRepository(context: Context) {
                 pageToken?.let { append("&pageToken=${java.net.URLEncoder.encode(it, "UTF-8")}") }
             }
             val page = call(Request.Builder().url("https://photospicker.googleapis.com/v1/mediaItems$query")
-                .header("Authorization", "Bearer $token").get().build())
+                .header("Authorization", "Bearer $token").get().build(), "Google Photos Picker (Fotos abrufen)")
             val items = page.optJSONArray("mediaItems")
             if (items != null) for (i in 0 until items.length()) {
                 val item = items.optJSONObject(i) ?: continue
@@ -115,11 +117,16 @@ class PickerRepository(context: Context) {
         paths
     }
 
-    private fun call(request: Request): JSONObject = http.newCall(request).execute().use { response ->
+    private fun call(request: Request, operation: String): JSONObject = http.newCall(request).execute().use { response ->
         val raw = response.body?.string().orEmpty()
         check(response.isSuccessful) {
-            runCatching { JSONObject(raw).getJSONObject("error").optString("message") }.getOrNull()?.ifBlank { null }
-                ?: "Google Photos Picker API Fehler (${response.code})."
+            val body = runCatching { JSONObject(raw) }.getOrNull()
+            val error = body?.optJSONObject("error")
+            val detail = error?.optString("message")?.takeIf(String::isNotBlank)
+                ?: body?.optString("error_description")?.takeIf(String::isNotBlank)
+                ?: error?.optString("status")?.takeIf(String::isNotBlank)
+                ?: body?.optString("error")?.takeIf(String::isNotBlank)
+            "$operation fehlgeschlagen (HTTP ${response.code})${detail?.let { ": $it" } ?: "."}"
         }
         JSONObject(raw)
     }

@@ -74,7 +74,6 @@ private val Accent = Color(0xFFE8C98C)
 private val RemoteFocus = Color(0xFF42D9FF)
 private val RemoteFocusSurface = Color(0xFF153744)
 class MainActivity : ComponentActivity() {
-    private val ambientRepo by lazy { AmbientRepository(this) }
     private val pickerRepo by lazy { PickerRepository(this) }
     private var googleError by mutableStateOf<String?>(null)
     private var pickerUri by mutableStateOf<String?>(null)
@@ -161,15 +160,12 @@ class MainActivity : ComponentActivity() {
             val localPhotos = localPhotoUris
             var seconds by remember { mutableIntStateOf(prefs.getInt("seconds", 8)) }
             var shuffle by remember { mutableStateOf(prefs.getBoolean("shuffle", false)) }
-            var orientation by remember { mutableIntStateOf(prefs.getInt("orientation", 0)) }
             var displayRotation by remember { mutableIntStateOf(prefs.getInt("display_rotation", 0)) }
             var orientationChosen by remember { mutableStateOf(prefs.contains("display_rotation")) }
             var panZoom by remember { mutableStateOf(prefs.getBoolean("pan_zoom", false)) }
             var playing by remember { mutableStateOf(false) }
             var index by remember { mutableIntStateOf(0) }
             var showSettings by remember { mutableStateOf(false) }
-            var showGoogleSourceDialog by remember { mutableStateOf(false) }
-            var googleChoiceSelected by remember { mutableIntStateOf(0) }
             var setupConfirmSelected by remember { mutableStateOf(false) }
             var sourceCardFocus by remember { mutableIntStateOf(-1) }
             var focusedSettingsNode by remember { mutableIntStateOf(0) }
@@ -184,7 +180,7 @@ class MainActivity : ComponentActivity() {
             val images = remember(localPhotos, importedFiles) { (localPhotos.map { "uri:$it" } + importedFiles.map { "file:$it" }).distinct() }
 
             MaterialTheme(colorScheme = darkColorScheme(primary = Accent, background = Ink, surface = SurfaceCard, onBackground = Color.White, onSurface = Color.White)) {
-                DisposableEffect(playing, images.size, orientationChosen, displayRotation, setupConfirmSelected, sourceCardFocus, focusedSettingsNode, showSettings, showGoogleSourceDialog, googleChoiceSelected, pickerUri, googleError, message) {
+                DisposableEffect(playing, images.size, orientationChosen, displayRotation, setupConfirmSelected, sourceCardFocus, focusedSettingsNode, showSettings, pickerUri, googleError, message) {
                     remoteKeyHandler = when {
                         !orientationChosen -> { code ->
                             when (code) {
@@ -204,22 +200,11 @@ class MainActivity : ComponentActivity() {
                                 else -> false
                             }
                         }
-                        showGoogleSourceDialog -> { code ->
-                            when (code) {
-                                KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_LEFT -> { googleChoiceSelected = 0; true }
-                                KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_RIGHT -> { googleChoiceSelected = 1; true }
-                                KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_SPACE -> {
-                                    showGoogleSourceDialog = false
-                                    if (googleChoiceSelected == 0) requestGooglePickerAccess() else requestGoogleAccess()
-                                    true
-                                }
-                                else -> false
-                            }
-                        }
                         googleError != null || message != null -> { code ->
                             when (code) {
                                 KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_DOWN,
                                 KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_UP -> true
+                                KeyEvent.KEYCODE_BACK -> { googleError = null; message = null; true }
                                 KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_SPACE -> { googleError = null; message = null; true }
                                 else -> false
                             }
@@ -240,35 +225,31 @@ class MainActivity : ComponentActivity() {
                                 KeyEvent.KEYCODE_DPAD_RIGHT -> {
                                     when (focusedSettingsNode) {
                                         0 -> focusedSettingsNode = 1
-                                        in 2..4 -> focusedSettingsNode++
-                                        7 -> seconds = (seconds + 1).coerceAtMost(60)
+                                        3 -> seconds = (seconds + 1).coerceAtMost(60)
                                     }
-                                    if (focusedSettingsNode == 7) prefs.edit().putInt("seconds", seconds).apply()
+                                    if (focusedSettingsNode == 3) prefs.edit().putInt("seconds", seconds).apply()
                                     true
                                 }
                                 KeyEvent.KEYCODE_DPAD_LEFT -> {
                                     when (focusedSettingsNode) {
                                         1 -> focusedSettingsNode = 0
-                                        in 3..5 -> focusedSettingsNode--
-                                        7 -> seconds = (seconds - 1).coerceAtLeast(3)
+                                        3 -> seconds = (seconds - 1).coerceAtLeast(3)
                                     }
-                                    if (focusedSettingsNode == 7) prefs.edit().putInt("seconds", seconds).apply()
+                                    if (focusedSettingsNode == 3) prefs.edit().putInt("seconds", seconds).apply()
                                     true
                                 }
                                 KeyEvent.KEYCODE_DPAD_DOWN -> {
                                     focusedSettingsNode = when (focusedSettingsNode) {
                                         0, 1 -> 2
-                                        in 2..5 -> 6
-                                        6 -> 7
-                                        else -> 7
+                                        2 -> 3
+                                        else -> 3
                                     }
                                     true
                                 }
                                 KeyEvent.KEYCODE_DPAD_UP -> {
                                     focusedSettingsNode = when (focusedSettingsNode) {
-                                        in 2..5 -> 0
-                                        6 -> 2
-                                        7 -> 6
+                                        2 -> 0
+                                        3 -> 2
                                         else -> 0
                                     }
                                     true
@@ -277,9 +258,8 @@ class MainActivity : ComponentActivity() {
                                     when (focusedSettingsNode) {
                                         0 -> { displayRotation = nextDisplayRotation(displayRotation); displayDirectionForKeys = displayRotation }
                                         1 -> { prefs.edit().putInt("display_rotation", displayRotation).apply(); showSettings = false }
-                                        in 2..5 -> { orientation = (focusedSettingsNode - 2) * 90; prefs.edit().putInt("orientation", orientation).apply() }
-                                        6 -> { panZoom = !panZoom; prefs.edit().putBoolean("pan_zoom", panZoom).apply() }
-                                        7 -> { seconds = if (seconds >= 60) 3 else seconds + 1; prefs.edit().putInt("seconds", seconds).apply() }
+                                        2 -> { panZoom = !panZoom; prefs.edit().putBoolean("pan_zoom", panZoom).apply() }
+                                        3 -> { seconds = if (seconds >= 60) 3 else seconds + 1; prefs.edit().putInt("seconds", seconds).apply() }
                                     }
                                     true
                                 }
@@ -291,7 +271,7 @@ class MainActivity : ComponentActivity() {
                                 KeyEvent.KEYCODE_DPAD_RIGHT -> { if (sourceCardFocus == 0) googleSourceFocusRequester.requestFocus(); true }
                                 KeyEvent.KEYCODE_DPAD_LEFT -> { if (sourceCardFocus == 1) localSourceFocusRequester.requestFocus(); true }
                                 KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_SPACE -> {
-                                    if (sourceCardFocus == 0) photoChooser.launch(arrayOf("image/*")) else { googleChoiceSelected = 0; showGoogleSourceDialog = true }
+                                    if (sourceCardFocus == 0) photoChooser.launch(arrayOf("image/*")) else requestGooglePickerAccess()
                                     true
                                 }
                                 else -> false
@@ -335,7 +315,6 @@ class MainActivity : ComponentActivity() {
                     displayDirectionForKeys = rotationBeforeSettings
                     showSettings = false
                 }
-                BackHandler(showGoogleSourceDialog) { showGoogleSourceDialog = false }
                 BackHandler(pickerUri != null) { cancelGooglePicker() }
                 BackHandler(!orientationChosen) {
                     displayRotation = 0
@@ -350,14 +329,18 @@ class MainActivity : ComponentActivity() {
                         runCatching { localSourceFocusRequester.requestFocus() }
                     }
                 }
-                LaunchedEffect(showSettings, showGoogleSourceDialog, pickerUri, googleError, message, orientationChosen) {
-                    if (showSettings || showGoogleSourceDialog || pickerUri != null || googleError != null || message != null || !orientationChosen) {
+                LaunchedEffect(showSettings, pickerUri, googleError, message, orientationChosen) {
+                    if (showSettings || pickerUri != null || googleError != null || message != null || !orientationChosen) {
                         delay(40)
                         focusManager.clearFocus(force = true)
                     }
                 }
 
-                BoxWithConstraints(Modifier.fillMaxSize().background(Ink), contentAlignment = Alignment.Center) {
+                BoxWithConstraints(
+                    Modifier.fillMaxSize().background(Ink).padding(28.dp)
+                        .border(2.dp, Color(0xFF394654)).padding(14.dp),
+                    contentAlignment = Alignment.Center
+                ) {
                     val swapsDimensions = displayRotation == 90 || displayRotation == 270
                     Box(
                         Modifier
@@ -368,9 +351,9 @@ class MainActivity : ComponentActivity() {
                             .graphicsLayer { rotationZ = displayRotation.toFloat() }
                             .background(Ink)
                     ) {
-                    val modalVisible = showSettings || showGoogleSourceDialog || pickerUri != null || googleError != null || message != null || !orientationChosen
+                    val modalVisible = showSettings || pickerUri != null || googleError != null || message != null || !orientationChosen
                     if (playing && images.isNotEmpty()) {
-                        PlaybackView(images, index, orientation, panZoom, seconds, playing, onPause = { playing = false }, onNext = { index = (index + 1) % images.size }, onPrevious = { index = (index - 1 + images.size) % images.size })
+                        PlaybackView(images, index, displayRotation, panZoom, seconds, playing, onPause = { playing = false }, onNext = { index = (index + 1) % images.size }, onPrevious = { index = (index - 1 + images.size) % images.size })
                     } else if (modalVisible) {
                         Spacer(Modifier.fillMaxSize().background(Ink))
                     } else {
@@ -416,7 +399,7 @@ class MainActivity : ComponentActivity() {
                             Spacer(Modifier.height(10.dp))
                             Row(Modifier.fillMaxWidth().focusGroup(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 SourceCard("Local images", "Fotos von diesem Gerät", Icons.Default.FolderOpen, Modifier.weight(1f).focusRequester(localSourceFocusRequester), count = localPhotos.size, onClick = { photoChooser.launch(arrayOf("image/*")) }, onFocusChange = { if (it) sourceCardFocus = 0 else if (sourceCardFocus == 0) sourceCardFocus = -1 })
-                                SourceCard("Google Fotos", "Picker oder Ambient", Icons.Default.Cloud, Modifier.weight(1f).focusRequester(googleSourceFocusRequester), count = importedFiles.size, onClick = { googleChoiceSelected = 0; showGoogleSourceDialog = true }, onFocusChange = { if (it) sourceCardFocus = 1 else if (sourceCardFocus == 1) sourceCardFocus = -1 })
+                                SourceCard("Google Fotos", "Picker · Fotos auswählen", Icons.Default.Cloud, Modifier.weight(1f).focusRequester(googleSourceFocusRequester), count = importedFiles.size, onClick = { requestGooglePickerAccess() }, onFocusChange = { if (it) sourceCardFocus = 1 else if (sourceCardFocus == 1) sourceCardFocus = -1 })
                             }
                             if (isImporting) {
                                 LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 12.dp), color = Accent)
@@ -455,7 +438,10 @@ class MainActivity : ComponentActivity() {
                                 Slider(value = seconds.toFloat(), onValueChange = { seconds = it.toInt().coerceIn(3, 60); prefs.edit().putInt("seconds", seconds).apply() }, valueRange = 3f..60f, colors = SliderDefaults.colors(thumbColor = Accent, activeTrackColor = Accent))
                             }
                             Spacer(Modifier.weight(1f))
-                            Text("Bilddrehung: ${orientation}° · Display: ${displayDirectionName(displayRotation)}", color = Color(0xFF788390), fontSize = 12.sp, modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 12.dp), textAlign = TextAlign.Center)
+                            Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                                Text("Ausrichtung: ${displayRotation}° · Version: ${BuildConfig.VERSION_NAME}", color = Color(0xFF9AA6B4), fontSize = 12.sp)
+                                TextButton(onClick = { checkForUpdates(force = true) }) { Text("Nach Updates suchen", color = Accent, fontSize = 12.sp) }
+                            }
                         }
                     }
                     if (!orientationChosen) {
@@ -477,22 +463,11 @@ class MainActivity : ComponentActivity() {
                     pickerUri?.let { url ->
                         PickerQrDialog(url, googleUserCode, importStatus, qrDoneSelected, pickerApiFlow, onCancel = { cancelGooglePicker() }, onDone = { pickerUri = null })
                     }
-                    if (showGoogleSourceDialog) {
-                        GoogleSourceDialog(
-                            selected = googleChoiceSelected,
-                            onSelect = { choice ->
-                                showGoogleSourceDialog = false
-                                if (choice == 0) requestGooglePickerAccess() else requestGoogleAccess()
-                            },
-                            onCancel = { showGoogleSourceDialog = false }
-                        )
-                    }
                     (googleError ?: message)?.let { text -> InlineMessageDialog(text) { googleError = null; message = null } }
                     if (showSettings) {
                         SettingsDialog(
-                            seconds, orientation, panZoom, displayRotation, focusedSettingsNode,
+                            seconds, panZoom, displayRotation, focusedSettingsNode,
                             onSeconds = { seconds = it; prefs.edit().putInt("seconds", it).apply() },
-                            onOrientation = { orientation = it; prefs.edit().putInt("orientation", it).apply() },
                             onPanZoom = { panZoom = it; prefs.edit().putBoolean("pan_zoom", it).apply() },
                             onRotateDisplay = {
                                 displayRotation = nextDisplayRotation(displayRotation)
@@ -511,7 +486,7 @@ class MainActivity : ComponentActivity() {
         checkForUpdates()
     }
 
-    private fun checkForUpdates() {
+    private fun checkForUpdates(force: Boolean = false) {
         lifecycleScope.launch {
             val prefs = getSharedPreferences("carousel", MODE_PRIVATE)
             val cachedTag = prefs.getString("latest_release_tag", null)
@@ -520,15 +495,21 @@ class MainActivity : ComponentActivity() {
             }
             val now = System.currentTimeMillis()
             val lastCheck = prefs.getLong("latest_release_checked_at", 0L)
-            if (now - lastCheck < 6 * 60 * 60 * 1000L) return@launch
+            if (!force && now - lastCheck < 15 * 60 * 1000L) return@launch
+            updateBusy = true
+            if (force) updateStatus = "Suche nach Updates …"
             val release = runCatching { withContext(Dispatchers.IO) { ReleaseUpdater.latest() } }.getOrNull()
             if (release != null && ReleaseUpdater.isNewer(release.tag, BuildConfig.VERSION_NAME)) {
                 updateRelease = release
                 updateStatus = null
+            } else if (force) {
+                updateRelease = null
+                updateStatus = if (release == null) "Update-Prüfung fehlgeschlagen. Später erneut versuchen." else "Du verwendest bereits die aktuelle Version."
             }
             if (release != null) {
                 prefs.edit().putString("latest_release_tag", release.tag).putLong("latest_release_checked_at", now).apply()
             }
+            updateBusy = false
         }
     }
 
@@ -575,40 +556,6 @@ class MainActivity : ComponentActivity() {
             startActivity(intent)
         } catch (error: Exception) {
             updateStatus = error.localizedMessage ?: "Der Android-Installationsdialog konnte nicht geöffnet werden."
-        }
-    }
-
-    private fun requestGoogleAccess() {
-        pickerApiFlow = false
-        isImporting = true
-        importStatus = "Google Ambient-Anmeldung wird vorbereitet …"
-        googleFlowJob?.cancel()
-        googleFlowJob = lifecycleScope.launch {
-            runCatching {
-                val auth = ambientRepo.requestDeviceCode()
-                pickerUri = auth.verificationUrl
-                googleUserCode = auth.userCode
-                importStatus = "Scanne den Code und gib den angezeigten Code ein …"
-                val token = ambientRepo.authorize(auth) { importStatus = it }
-                importStatus = "Google Fotos Gerät wird eingerichtet …"
-                val device = ambientRepo.createDevice(token)
-                pickerUri = device.settingsUri
-                googleUserCode = ""
-                importStatus = "Wähle auf dem Handy ein Album aus …"
-                ambientRepo.waitForSources(token, device) { importStatus = it }
-            }.onSuccess { paths ->
-                importedFiles = paths
-                getSharedPreferences("carousel", MODE_PRIVATE).edit().putStringSet("google_photos", paths.toSet()).apply()
-                isImporting = false; importStatus = "${paths.size} Fotos übernommen."; pickerUri = null
-            }.onFailure { error ->
-                isImporting = false
-                pickerUri = null
-                if (error is CancellationException) return@launch
-                val detail = error.localizedMessage.orEmpty()
-                googleError = if (detail.contains("permission", ignoreCase = true) || detail.contains("PERMISSION_DENIED", ignoreCase = true)) {
-                    "Google hat den Zugriff auf die Ambient API für dieses Projekt noch nicht freigegeben. Laut Google muss das Projekt zuerst ins Google Photos Partner Program aufgenommen werden. OAuth-Client und API-Aktivierung allein reichen nicht.\n\nAntrag: developers.google.com/photos/partner-program/overview"
-                } else detail.ifBlank { "Google Fotos konnte nicht verbunden werden." }
-            }
         }
     }
 
@@ -667,39 +614,6 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun GoogleSourceDialog(selected: Int, onSelect: (Int) -> Unit, onCancel: () -> Unit) {
-    Box(Modifier.fillMaxSize().background(Color(0xCC000000)).focusGroup(), contentAlignment = Alignment.Center) {
-        Surface(Modifier.fillMaxWidth().widthIn(max = 560.dp), color = SurfaceCard, shape = RoundedCornerShape(22.dp)) {
-            Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("Google Fotos verbinden", color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.SemiBold)
-                Text("Wähle den Zugriff für diese Diashow.", color = Color(0xFFCFD5DD), modifier = Modifier.padding(top = 8.dp, bottom = 18.dp))
-                Button(
-                    onClick = { onSelect(0) },
-                    modifier = Modifier.fillMaxWidth().then(if (selected == 0) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(14.dp)) else Modifier),
-                    colors = ButtonDefaults.buttonColors(containerColor = if (selected == 0) RemoteFocusSurface else Color(0xFF303A47), contentColor = Color.White)
-                ) {
-                    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                        Text("Google Fotos auswählen", fontWeight = FontWeight.Bold)
-                        Text("Picker · direkt verfügbar · Fotos einzeln wählen", fontSize = 12.sp, color = Color(0xFFD3DCE6))
-                    }
-                }
-                Button(
-                    onClick = { onSelect(1) },
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp).then(if (selected == 1) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(14.dp)) else Modifier),
-                    colors = ButtonDefaults.buttonColors(containerColor = if (selected == 1) RemoteFocusSurface else Color(0xFF303A47), contentColor = Color.White)
-                ) {
-                    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                        Text("Ambient-Gerät verbinden", fontWeight = FontWeight.Bold)
-                        Text("Album-Auswahl · erst nach Google-Partnerfreigabe nutzbar", fontSize = 12.sp, color = Color(0xFFD3DCE6))
-                    }
-                }
-                TextButton(onClick = onCancel, modifier = Modifier.padding(top = 8.dp)) { Text("Abbrechen", color = Accent) }
-            }
-        }
-    }
-}
-
-@Composable
 private fun SourceCard(title: String, subtitle: String, icon: androidx.compose.ui.graphics.vector.ImageVector, modifier: Modifier, count: Int, onClick: () -> Unit, onFocusChange: (Boolean) -> Unit) {
     var focused by remember { mutableStateOf(false) }
     Column(
@@ -754,7 +668,6 @@ private fun PlaybackView(images: List<String>, index: Int, rotation: Int, panZoo
                 onSuccess = { state -> sourceLandscape = state.result.drawable.intrinsicWidth > state.result.drawable.intrinsicHeight },
                 modifier = Modifier.fillMaxSize().then(if (panEnabled) Modifier.clipToBounds() else Modifier.padding(18.dp))
                     .graphicsLayer {
-                        rotationZ = rotation.toFloat()
                         if (panEnabled) {
                             scaleX = 1.08f
                             scaleY = 1.08f
@@ -776,12 +689,10 @@ private fun PlaybackView(images: List<String>, index: Int, rotation: Int, panZoo
 @Composable
 private fun SettingsDialog(
     seconds: Int,
-    orientation: Int,
     panZoom: Boolean,
     displayRotation: Int,
     focusedSettingsNode: Int,
     onSeconds: (Int) -> Unit,
-    onOrientation: (Int) -> Unit,
     onPanZoom: (Boolean) -> Unit,
     onRotateDisplay: () -> Unit,
     onConfirmDisplay: () -> Unit
@@ -821,27 +732,6 @@ private fun SettingsDialog(
                     ) { Text("Bestätigen") }
                 }
                 Spacer(Modifier.height(16.dp))
-                Text("Bilddrehung", fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(0, 90, 180, 270).forEachIndexed { i, deg ->
-                        FilterChip(
-                            modifier = Modifier.focusProperties { canFocus = false }
-                                .then(if (focusedSettingsNode == i + 2) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(12.dp)) else Modifier),
-                            selected = orientation == deg,
-                            onClick = { onOrientation(deg) },
-                            label = { Text("${deg}°") },
-                            colors = FilterChipDefaults.filterChipColors(
-                                containerColor = SurfaceCard,
-                                labelColor = Color.White,
-                                selectedContainerColor = Accent,
-                                selectedLabelColor = Ink
-                            )
-                        )
-                    }
-                }
-                Text("Dreht die Fotos, ohne Originaldateien zu verändern.", fontSize = 12.sp, color = Color.Gray)
-                Spacer(Modifier.height(12.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("Schwenken & Zoomen", fontWeight = FontWeight.SemiBold)
@@ -851,7 +741,7 @@ private fun SettingsDialog(
                         checked = panZoom,
                         onCheckedChange = onPanZoom,
                         modifier = Modifier.focusProperties { canFocus = false }
-                            .then(if (focusedSettingsNode == 6) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(24.dp)) else Modifier)
+                            .then(if (focusedSettingsNode == 2) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(24.dp)) else Modifier)
                     )
                 }
                 Spacer(Modifier.height(14.dp))
@@ -861,7 +751,7 @@ private fun SettingsDialog(
                     onValueChange = { onSeconds(it.toInt().coerceIn(3, 60)) },
                     valueRange = 3f..60f,
                     modifier = Modifier.focusProperties { canFocus = false }
-                        .then(if (focusedSettingsNode == 7) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(12.dp)) else Modifier)
+                        .then(if (focusedSettingsNode == 3) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(12.dp)) else Modifier)
                 )
             }
         }
@@ -980,7 +870,7 @@ private fun PickerQrDialog(uri: String, userCode: String, status: String, doneSe
                 )
                 if (userCode.isNotBlank()) Text(userCode, color = Accent, fontWeight = FontWeight.Bold, fontSize = 22.sp, modifier = Modifier.padding(top = 8.dp))
                 Spacer(Modifier.height(14.dp))
-                if (bitmap != null) Image(bitmap, "QR-Code für Google Photos Ambient", modifier = Modifier.size(220.dp))
+                if (bitmap != null) Image(bitmap, "QR-Code für Google Fotos Picker", modifier = Modifier.size(220.dp))
                 Spacer(Modifier.height(8.dp))
                 Text(status.ifBlank { "Nach der Auswahl tippe auf Fertig." }, fontSize = 12.sp, color = Color.Gray, textAlign = TextAlign.Center)
                 Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.End) {
