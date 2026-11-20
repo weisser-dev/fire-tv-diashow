@@ -296,8 +296,10 @@ private fun PlaybackView(images: List<String>, index: Int, rotation: Int, panZoo
         val panEnabled = panZoom && sourceLandscape && (rotation == 90 || rotation == 270)
         LaunchedEffect(index, panEnabled, playing, seconds, maxWidth) {
             if (panEnabled && playing) {
-                panX.snapTo(0f)
-                panX.animateTo(with(density) { -maxWidth.toPx() * 0.18f }, tween(seconds * 1000, easing = LinearEasing))
+                val travel = with(density) { maxWidth.toPx() * 0.06f }
+                val start = if (index % 2 == 0) -travel else travel
+                panX.snapTo(start)
+                panX.animateTo(-start, tween(maxOf(seconds * 3, 15) * 1000, easing = LinearEasing))
             } else panX.snapTo(0f)
         }
         AnimatedContent(targetState = model, transitionSpec = { fadeIn(tween(700)) togetherWith fadeOut(tween(700)) }, label = "photo-fade") { photo ->
@@ -309,8 +311,8 @@ private fun PlaybackView(images: List<String>, index: Int, rotation: Int, panZoo
                     .graphicsLayer {
                         rotationZ = rotation.toFloat()
                         if (panEnabled) {
-                            scaleX = 1.2f
-                            scaleY = 1.2f
+                            scaleX = 1.08f
+                            scaleY = 1.08f
                             translationX = panX.value
                         }
                     },
@@ -342,7 +344,7 @@ private fun SettingsDialog(seconds: Int, orientation: Int, panZoom: Boolean, onS
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Schwenken & Zoomen", fontWeight = FontWeight.SemiBold)
-                    Text("Querformatfotos fahren im Portrait langsam von links nach rechts.", fontSize = 12.sp, color = Color.Gray)
+                    Text("Dezenter Schwenk: Bei 5 s Bilddauer bewegt sich das Bild nur leicht. Eine ganze Schwenkbewegung dauert mindestens 15 s.", fontSize = 12.sp, color = Color.Gray)
                 }
                 Switch(checked = panZoom, onCheckedChange = onPanZoom)
             }
