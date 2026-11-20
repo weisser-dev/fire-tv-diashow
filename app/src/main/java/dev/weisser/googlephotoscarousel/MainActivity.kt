@@ -92,46 +92,15 @@ class MainActivity : ComponentActivity() {
     private var downloadedUpdate by mutableStateOf<File?>(null)
     private var updateBusy by mutableStateOf(false)
     private var updateStatus by mutableStateOf<String?>(null)
-    private var displayDirectionForKeys = 0
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        val mapped = mapRemoteDirection(event.keyCode, displayDirectionForKeys)
-        if (event.action == KeyEvent.ACTION_DOWN && remoteKeyHandler?.invoke(mapped) == true) {
-            remoteHandledKeys += mapped
+        val keyCode = event.keyCode
+        if (event.action == KeyEvent.ACTION_DOWN && remoteKeyHandler?.invoke(keyCode) == true) {
+            remoteHandledKeys += keyCode
             return true
         }
-        if (event.action == KeyEvent.ACTION_UP && remoteHandledKeys.remove(mapped)) return true
-        if (mapped == event.keyCode) return super.dispatchKeyEvent(event)
-        val remappedEvent = KeyEvent(
-            event.downTime, event.eventTime, event.action, mapped, event.repeatCount,
-            event.metaState, event.deviceId, event.scanCode, event.flags, event.source
-        )
-        return super.dispatchKeyEvent(remappedEvent)
-    }
-
-    private fun mapRemoteDirection(keyCode: Int, rotation: Int): Int {
-        if (rotation == 180) return when (keyCode) {
-            KeyEvent.KEYCODE_DPAD_UP -> KeyEvent.KEYCODE_DPAD_DOWN
-            KeyEvent.KEYCODE_DPAD_DOWN -> KeyEvent.KEYCODE_DPAD_UP
-            KeyEvent.KEYCODE_DPAD_LEFT -> KeyEvent.KEYCODE_DPAD_RIGHT
-            KeyEvent.KEYCODE_DPAD_RIGHT -> KeyEvent.KEYCODE_DPAD_LEFT
-            else -> keyCode
-        }
-        if (rotation == 90) return when (keyCode) {
-            KeyEvent.KEYCODE_DPAD_UP -> KeyEvent.KEYCODE_DPAD_LEFT
-            KeyEvent.KEYCODE_DPAD_RIGHT -> KeyEvent.KEYCODE_DPAD_UP
-            KeyEvent.KEYCODE_DPAD_DOWN -> KeyEvent.KEYCODE_DPAD_RIGHT
-            KeyEvent.KEYCODE_DPAD_LEFT -> KeyEvent.KEYCODE_DPAD_DOWN
-            else -> keyCode
-        }
-        if (rotation == 270) return when (keyCode) {
-            KeyEvent.KEYCODE_DPAD_UP -> KeyEvent.KEYCODE_DPAD_RIGHT
-            KeyEvent.KEYCODE_DPAD_RIGHT -> KeyEvent.KEYCODE_DPAD_DOWN
-            KeyEvent.KEYCODE_DPAD_DOWN -> KeyEvent.KEYCODE_DPAD_LEFT
-            KeyEvent.KEYCODE_DPAD_LEFT -> KeyEvent.KEYCODE_DPAD_UP
-            else -> keyCode
-        }
-        return keyCode
+        if (event.action == KeyEvent.ACTION_UP && remoteHandledKeys.remove(keyCode)) return true
+        return super.dispatchKeyEvent(event)
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
@@ -152,7 +121,6 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val photoPrefs = getSharedPreferences("carousel", MODE_PRIVATE)
-        displayDirectionForKeys = photoPrefs.getInt("display_rotation", 0)
         localPhotoUris = photoPrefs.getStringSet("local_photos", emptySet()).orEmpty().toList()
         importedFiles = photoPrefs.getStringSet("google_photos", emptySet()).orEmpty().toList()
         setContent {
@@ -181,6 +149,7 @@ class MainActivity : ComponentActivity() {
             var settingsButtonFocused by remember { mutableStateOf(false) }
             var updateCheckFocused by remember { mutableStateOf(false) }
             val images = remember(localPhotos, importedFiles) { (localPhotos.map { "uri:$it" } + importedFiles.map { "file:$it" }).distinct() }
+            val portraitUi = displayRotation == 90 || displayRotation == 270
 
             MaterialTheme(colorScheme = darkColorScheme(primary = Accent, background = Ink, surface = SurfaceCard, onBackground = Color.White, onSurface = Color.White)) {
                 fun focusMainNode(node: Int) {
@@ -206,7 +175,6 @@ class MainActivity : ComponentActivity() {
                                         orientationChosen = true
                                     } else {
                                         displayRotation = nextDisplayRotation(displayRotation)
-                                        displayDirectionForKeys = displayRotation
                                         setupConfirmSelected = false
                                     }
                                     true
@@ -253,7 +221,9 @@ class MainActivity : ComponentActivity() {
                                     true
                                 }
                                 KeyEvent.KEYCODE_DPAD_DOWN -> {
-                                    focusedSettingsNode = when (focusedSettingsNode) {
+                                    focusedSettingsNode = if (portraitUi) {
+                                        (focusedSettingsNode + 1).coerceAtMost(3)
+                                    } else when (focusedSettingsNode) {
                                         0, 1 -> 2
                                         2 -> 3
                                         else -> 3
@@ -261,7 +231,9 @@ class MainActivity : ComponentActivity() {
                                     true
                                 }
                                 KeyEvent.KEYCODE_DPAD_UP -> {
-                                    focusedSettingsNode = when (focusedSettingsNode) {
+                                    focusedSettingsNode = if (portraitUi) {
+                                        (focusedSettingsNode - 1).coerceAtLeast(0)
+                                    } else when (focusedSettingsNode) {
                                         2 -> 0
                                         3 -> 2
                                         else -> 0
@@ -270,7 +242,7 @@ class MainActivity : ComponentActivity() {
                                 }
                                 KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_SPACE -> {
                                     when (focusedSettingsNode) {
-                                        0 -> { displayRotation = nextDisplayRotation(displayRotation); displayDirectionForKeys = displayRotation }
+                                        0 -> displayRotation = nextDisplayRotation(displayRotation)
                                         1 -> { prefs.edit().putInt("display_rotation", displayRotation).apply(); showSettings = false }
                                         2 -> { panZoom = !panZoom; prefs.edit().putBoolean("pan_zoom", panZoom).apply() }
                                         3 -> { seconds = if (seconds >= 60) 3 else seconds + 1; prefs.edit().putInt("seconds", seconds).apply() }
@@ -284,20 +256,33 @@ class MainActivity : ComponentActivity() {
                             when (code) {
                                 KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_LEFT,
                                 KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                                    when (mainFocusNode) {
-                                        0 -> focusMainNode(if (code == KeyEvent.KEYCODE_DPAD_LEFT) 2 else 1)
-                                        1 -> when (code) {
-                                            KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_DOWN -> focusMainNode(2)
-                                            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_LEFT -> focusMainNode(0)
+                                    if (portraitUi) {
+                                        when (mainFocusNode) {
+                                            0 -> if (code == KeyEvent.KEYCODE_DPAD_DOWN) focusMainNode(1)
+                                            1 -> when (code) {
+                                                KeyEvent.KEYCODE_DPAD_UP -> focusMainNode(0)
+                                                KeyEvent.KEYCODE_DPAD_DOWN -> focusMainNode(2)
+                                            }
+                                            2 -> when (code) {
+                                                KeyEvent.KEYCODE_DPAD_UP -> focusMainNode(1)
+                                                KeyEvent.KEYCODE_DPAD_DOWN -> focusMainNode(3)
+                                            }
+                                            3 -> if (code == KeyEvent.KEYCODE_DPAD_UP) focusMainNode(2)
                                         }
-                                        2 -> when (code) {
-                                            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_UP -> focusMainNode(1)
-                                            KeyEvent.KEYCODE_DPAD_RIGHT -> focusMainNode(0)
-                                            KeyEvent.KEYCODE_DPAD_DOWN -> focusMainNode(3)
-                                        }
-                                        3 -> when (code) {
-                                            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_LEFT -> focusMainNode(1)
-                                            KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_RIGHT -> focusMainNode(2)
+                                    } else {
+                                        when (mainFocusNode) {
+                                            0 -> if (code == KeyEvent.KEYCODE_DPAD_DOWN) focusMainNode(1)
+                                            1 -> when (code) {
+                                                KeyEvent.KEYCODE_DPAD_RIGHT -> focusMainNode(2)
+                                                KeyEvent.KEYCODE_DPAD_UP -> focusMainNode(0)
+                                                KeyEvent.KEYCODE_DPAD_DOWN -> focusMainNode(3)
+                                            }
+                                            2 -> when (code) {
+                                                KeyEvent.KEYCODE_DPAD_LEFT -> focusMainNode(1)
+                                                KeyEvent.KEYCODE_DPAD_UP -> focusMainNode(0)
+                                                KeyEvent.KEYCODE_DPAD_DOWN -> focusMainNode(3)
+                                            }
+                                            3 -> if (code == KeyEvent.KEYCODE_DPAD_UP) focusMainNode(2)
                                         }
                                     }
                                     true
@@ -315,10 +300,19 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                         playing && images.isNotEmpty() -> { code ->
-                            when (code) {
-                                KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_MEDIA_NEXT -> { index = (index + 1) % images.size; true }
-                                KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_MEDIA_PREVIOUS -> { index = (index - 1 + images.size) % images.size; true }
-                                KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_SPACE, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> { playing = !playing; true }
+                            when {
+                                (portraitUi && code == KeyEvent.KEYCODE_DPAD_DOWN) || (!portraitUi && code == KeyEvent.KEYCODE_DPAD_RIGHT) || code == KeyEvent.KEYCODE_MEDIA_NEXT -> {
+                                    index = (index + 1) % images.size
+                                    true
+                                }
+                                (portraitUi && code == KeyEvent.KEYCODE_DPAD_UP) || (!portraitUi && code == KeyEvent.KEYCODE_DPAD_LEFT) || code == KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
+                                    index = (index - 1 + images.size) % images.size
+                                    true
+                                }
+                                code == KeyEvent.KEYCODE_ENTER || code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_SPACE || code == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
+                                    playing = !playing
+                                    true
+                                }
                                 else -> false
                             }
                         }
@@ -349,13 +343,11 @@ class MainActivity : ComponentActivity() {
                 BackHandler(playing) { playing = false }
                 BackHandler(showSettings) {
                     displayRotation = rotationBeforeSettings
-                    displayDirectionForKeys = rotationBeforeSettings
                     showSettings = false
                 }
                 BackHandler(pickerUri != null) { cancelGooglePicker() }
                 BackHandler(!orientationChosen) {
                     displayRotation = 0
-                    displayDirectionForKeys = 0
                     prefs.edit().putInt("display_rotation", 0).apply()
                     orientationChosen = true
                 }
@@ -434,9 +426,16 @@ class MainActivity : ComponentActivity() {
                             Spacer(Modifier.height(22.dp))
                             Text("QUELLE WÄHLEN", color = Color(0xFF9DA8B6), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
                             Spacer(Modifier.height(10.dp))
-                            Row(Modifier.fillMaxWidth().focusGroup(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                SourceCard("Dateien", "Fotos von diesem Gerät", Icons.Default.FolderOpen, Modifier.weight(1f).focusRequester(localSourceFocusRequester), count = localPhotos.size, onClick = { photoChooser.launch(arrayOf("image/*")) }, onFocusChange = { if (it) { sourceCardFocus = 0; mainFocusNode = 1 } else if (sourceCardFocus == 0) { sourceCardFocus = -1; if (mainFocusNode == 1) mainFocusNode = -1 } })
-                                SourceCard("Google Fotos", "Picker · Verbindung pausiert", Icons.Default.Cloud, Modifier.weight(1f).focusRequester(googleSourceFocusRequester), count = importedFiles.size, onClick = { requestGooglePickerAccess() }, onFocusChange = { if (it) { sourceCardFocus = 1; mainFocusNode = 2 } else if (sourceCardFocus == 1) { sourceCardFocus = -1; if (mainFocusNode == 2) mainFocusNode = -1 } })
+                            if (portraitUi) {
+                                Column(Modifier.fillMaxWidth().focusGroup(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    SourceCard("Dateien", "Fotos von diesem Gerät", Icons.Default.FolderOpen, Modifier.fillMaxWidth().focusRequester(localSourceFocusRequester), count = localPhotos.size, onClick = { photoChooser.launch(arrayOf("image/*")) }, onFocusChange = { if (it) { sourceCardFocus = 0; mainFocusNode = 1 } else if (sourceCardFocus == 0) { sourceCardFocus = -1; if (mainFocusNode == 1) mainFocusNode = -1 } })
+                                    SourceCard("Google Fotos", "Picker · Verbindung pausiert", Icons.Default.Cloud, Modifier.fillMaxWidth().focusRequester(googleSourceFocusRequester), count = importedFiles.size, onClick = { requestGooglePickerAccess() }, onFocusChange = { if (it) { sourceCardFocus = 1; mainFocusNode = 2 } else if (sourceCardFocus == 1) { sourceCardFocus = -1; if (mainFocusNode == 2) mainFocusNode = -1 } })
+                                }
+                            } else {
+                                Row(Modifier.fillMaxWidth().focusGroup(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    SourceCard("Dateien", "Fotos von diesem Gerät", Icons.Default.FolderOpen, Modifier.weight(1f).focusRequester(localSourceFocusRequester), count = localPhotos.size, onClick = { photoChooser.launch(arrayOf("image/*")) }, onFocusChange = { if (it) { sourceCardFocus = 0; mainFocusNode = 1 } else if (sourceCardFocus == 0) { sourceCardFocus = -1; if (mainFocusNode == 1) mainFocusNode = -1 } })
+                                    SourceCard("Google Fotos", "Picker · Verbindung pausiert", Icons.Default.Cloud, Modifier.weight(1f).focusRequester(googleSourceFocusRequester), count = importedFiles.size, onClick = { requestGooglePickerAccess() }, onFocusChange = { if (it) { sourceCardFocus = 1; mainFocusNode = 2 } else if (sourceCardFocus == 1) { sourceCardFocus = -1; if (mainFocusNode == 2) mainFocusNode = -1 } })
+                                }
                             }
                             if (isImporting) {
                                 LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 12.dp), color = Accent)
@@ -488,11 +487,11 @@ class MainActivity : ComponentActivity() {
                     if (!orientationChosen) {
                         DisplayDirectionSetup(
                             rotation = displayRotation,
+                            portraitUi = portraitUi,
                             confirmSelected = setupConfirmSelected,
                             onConfirmSelected = { setupConfirmSelected = it },
                             onRotate = {
                                 displayRotation = nextDisplayRotation(displayRotation)
-                                displayDirectionForKeys = displayRotation
                                 setupConfirmSelected = false
                             },
                             onConfirm = {
@@ -507,12 +506,11 @@ class MainActivity : ComponentActivity() {
                     (googleError ?: message)?.let { text -> InlineMessageDialog(text) { googleError = null; message = null } }
                     if (showSettings) {
                         SettingsDialog(
-                            seconds, panZoom, displayRotation, focusedSettingsNode,
+                            seconds, panZoom, displayRotation, focusedSettingsNode, portraitUi,
                             onSeconds = { seconds = it; prefs.edit().putInt("seconds", it).apply() },
                             onPanZoom = { panZoom = it; prefs.edit().putBoolean("pan_zoom", it).apply() },
                             onRotateDisplay = {
                                 displayRotation = nextDisplayRotation(displayRotation)
-                                displayDirectionForKeys = displayRotation
                             },
                             onConfirmDisplay = {
                                 prefs.edit().putInt("display_rotation", displayRotation).apply()
@@ -703,6 +701,7 @@ private fun SettingsDialog(
     panZoom: Boolean,
     displayRotation: Int,
     focusedSettingsNode: Int,
+    portraitUi: Boolean,
     onSeconds: (Int) -> Unit,
     onPanZoom: (Boolean) -> Unit,
     onRotateDisplay: () -> Unit,
@@ -716,10 +715,10 @@ private fun SettingsDialog(
                 Text("Displayrichtung", fontWeight = FontWeight.SemiBold)
                 Text("Vorschau: ${displayDirectionName(displayRotation)} · Menü und Fernbedienung drehen sofort mit.", fontSize = 12.sp, color = Color(0xFFCFD5DD))
                 Spacer(Modifier.height(10.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                val rotateButton: @Composable (Modifier) -> Unit = { buttonModifier ->
                     OutlinedButton(
                         onClick = onRotateDisplay,
-                        modifier = Modifier.weight(1f)
+                        modifier = buttonModifier
                             .focusProperties { canFocus = false }
                             .then(if (focusedSettingsNode == 0) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(14.dp)) else Modifier),
                         colors = ButtonDefaults.outlinedButtonColors(
@@ -731,9 +730,11 @@ private fun SettingsDialog(
                         Spacer(Modifier.width(8.dp))
                         Text("Drehen")
                     }
+                }
+                val confirmButton: @Composable (Modifier) -> Unit = { buttonModifier ->
                     Button(
                         onClick = onConfirmDisplay,
-                        modifier = Modifier.weight(1f)
+                        modifier = buttonModifier
                             .focusProperties { canFocus = false }
                             .then(if (focusedSettingsNode == 1) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(14.dp)) else Modifier),
                         colors = ButtonDefaults.buttonColors(
@@ -741,6 +742,17 @@ private fun SettingsDialog(
                             contentColor = if (focusedSettingsNode == 1) Color.White else Ink
                         )
                     ) { Text("Bestätigen") }
+                }
+                if (portraitUi) {
+                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        rotateButton(Modifier.fillMaxWidth())
+                        confirmButton(Modifier.fillMaxWidth())
+                    }
+                } else {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        rotateButton(Modifier.weight(1f))
+                        confirmButton(Modifier.weight(1f))
+                    }
                 }
                 Spacer(Modifier.height(16.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -770,7 +782,7 @@ private fun SettingsDialog(
 }
 
 @Composable
-private fun DisplayDirectionSetup(rotation: Int, confirmSelected: Boolean, onConfirmSelected: (Boolean) -> Unit, onRotate: () -> Unit, onConfirm: () -> Unit) {
+private fun DisplayDirectionSetup(rotation: Int, portraitUi: Boolean, confirmSelected: Boolean, onConfirmSelected: (Boolean) -> Unit, onRotate: () -> Unit, onConfirm: () -> Unit) {
     val rotateRequester = remember { FocusRequester() }
     var rotateFocused by remember { mutableStateOf(false) }
     var confirmFocused by remember { mutableStateOf(false) }
@@ -786,10 +798,10 @@ private fun DisplayDirectionSetup(rotation: Int, confirmSelected: Boolean, onCon
                 Text("Wie ist dein Fernseher montiert?", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
                 Text("Drehe die Vorschau, bis sie auf deinem Fernseher richtig steht.", color = Color(0xFFCFD5DD), fontSize = 14.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp, bottom = 8.dp))
                 Text("Vorschau: ${displayDirectionName(rotation)}", color = Accent, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 16.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                val rotateButton: @Composable (Modifier) -> Unit = { buttonModifier ->
                     OutlinedButton(
                         onClick = onRotate,
-                        modifier = Modifier.weight(1f)
+                        modifier = buttonModifier
                             .focusRequester(rotateRequester)
                             .onFocusChanged { rotateFocused = it.isFocused; if (it.isFocused) onConfirmSelected(false) }
                             .then(if (!confirmSelected) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(14.dp)) else Modifier),
@@ -802,9 +814,11 @@ private fun DisplayDirectionSetup(rotation: Int, confirmSelected: Boolean, onCon
                         Spacer(Modifier.width(8.dp))
                         Text("Drehen")
                     }
+                }
+                val confirmButton: @Composable (Modifier) -> Unit = { buttonModifier ->
                     Button(
                         onClick = onConfirm,
-                        modifier = Modifier.weight(1f)
+                        modifier = buttonModifier
                             .onFocusChanged { confirmFocused = it.isFocused; if (it.isFocused) onConfirmSelected(true) }
                             .then(if (confirmSelected) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(14.dp)) else Modifier),
                         colors = ButtonDefaults.buttonColors(
@@ -812,6 +826,17 @@ private fun DisplayDirectionSetup(rotation: Int, confirmSelected: Boolean, onCon
                             contentColor = if (confirmFocused) Color.White else Ink
                         )
                     ) { Text("Bestätigen") }
+                }
+                if (portraitUi) {
+                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        rotateButton(Modifier.fillMaxWidth())
+                        confirmButton(Modifier.fillMaxWidth())
+                    }
+                } else {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        rotateButton(Modifier.weight(1f))
+                        confirmButton(Modifier.weight(1f))
+                    }
                 }
             }
         }
