@@ -83,32 +83,46 @@ class AmbientRepository(context: Context) {
         val deadline = System.currentTimeMillis() + 30 * 60_000
         while (System.currentTimeMillis() < deadline) {
             val current = call(Request.Builder().url("https://photosambient.googleapis.com/v1/devices/${device.id}").header("Authorization", "Bearer $token").get().build())
-            if (current.optBoolean("mediaSourcesSet")) return@withContext downloadMedia(token, device.id)
+            if (current.optBoolean("mediaSourcesSet")) {
+                val ids = current.optJSONArray("mediaSources")?.let { array ->
+                    (0 until array.length()).mapNotNull { array.optJSONObject(it)?.optString("id")?.takeIf(String::isNotBlank) }
+                }.orEmpty()
+                return@withContext downloadMedia(token, device.id, ids)
+            }
             onStatus("Wähle jetzt ein Album in Google Fotos aus …")
             delay((current.optJSONObject("pollingConfig")?.optString("pollInterval")?.removeSuffix("s")?.toLongOrNull() ?: device.pollSeconds).coerceAtLeast(5) * 1000)
         }
         error("Die Albumauswahl wurde nicht abgeschlossen. Scanne den QR-Code später erneut.")
     }
 
-    private suspend fun downloadMedia(token: String, deviceId: String): List<String> = withContext(Dispatchers.IO) {
+    private suspend fun downloadMedia(token: String, deviceId: String, mediaSourceIds: List<String>): List<String> = withContext(Dispatchers.IO) {
         val folder = File(app.filesDir, "google-photos").apply { mkdirs() }
-        val paths = mutableListOf<String>(); var pageToken: String? = null; var pageNo = 0
-        do {
-            val query = buildString { append("?deviceId=$deviceId&pageSize=100"); pageToken?.let { append("&pageToken=$it") } }
-            val page = call(Request.Builder().url("https://photosambient.googleapis.com/v1/mediaItems$query").header("Authorization", "Bearer $token").get().build())
-            val items = page.optJSONArray("mediaItems")
-            if (items != null) for (i in 0 until items.length()) {
-                val item = items.getJSONObject(i); val media = item.optJSONObject("mediaFile") ?: continue
-                val mime = media.optString("mimeType"); if (!mime.startsWith("image/")) continue
-                val baseUrl = media.optString("baseUrl"); if (baseUrl.isBlank()) continue
-                val name = media.optString("filename", "photo-${item.optString("id")}.jpg").replace(Regex("[^A-Za-z0-9._-]"), "_").take(100)
-                runCatching {
-                    val req = Request.Builder().url("$baseUrl=w3840-h3840").header("Authorization", "Bearer $token").get().build()
-                    http.newCall(req).execute().use { res -> check(res.isSuccessful); val file = File(folder, "${pageNo++}_$name"); file.outputStream().use { res.body!!.byteStream().copyTo(it) }; paths += file.absolutePath }
+        val paths = mutableListOf<String>(); var pageNo = 0
+        // Fetch every selected source explicitly so a selected album is not reduced to
+        // the curated subset returned by listMediaItems when mediaSourceId is omitted.
+        for (sourceId in mediaSourceIds.ifEmpty { listOf("") }) {
+            var pageToken: String? = null
+            do {
+                val query = buildString {
+                    append("?deviceId=${java.net.URLEncoder.encode(deviceId, "UTF-8")}&pageSize=100")
+                    if (sourceId.isNotBlank()) append("&mediaSourceId=${java.net.URLEncoder.encode(sourceId, "UTF-8")}")
+                    pageToken?.let { append("&pageToken=${java.net.URLEncoder.encode(it, "UTF-8")}") }
                 }
-            }
-            pageToken = page.optString("nextPageToken").takeIf { it.isNotBlank() }
-        } while (pageToken != null)
+                val page = call(Request.Builder().url("https://photosambient.googleapis.com/v1/mediaItems$query").header("Authorization", "Bearer $token").get().build())
+                val items = page.optJSONArray("mediaItems")
+                if (items != null) for (i in 0 until items.length()) {
+                    val item = items.getJSONObject(i); val media = item.optJSONObject("mediaFile") ?: continue
+                    val mime = media.optString("mimeType"); if (!mime.startsWith("image/")) continue
+                    val baseUrl = media.optString("baseUrl"); if (baseUrl.isBlank()) continue
+                    val name = media.optString("filename", "photo-${item.optString("id")}.jpg").replace(Regex("[^A-Za-z0-9._-]"), "_").take(100)
+                    runCatching {
+                        val req = Request.Builder().url("$baseUrl=w3840-h3840").header("Authorization", "Bearer $token").get().build()
+                        http.newCall(req).execute().use { res -> check(res.isSuccessful); val file = File(folder, "${pageNo++}_$name"); file.outputStream().use { res.body!!.byteStream().copyTo(it) }; paths += file.absolutePath }
+                    }
+                }
+                pageToken = page.optString("nextPageToken").takeIf { it.isNotBlank() }
+            } while (pageToken != null)
+        }
         check(paths.isNotEmpty()) { "Keine Bilder im ausgewählten Album gefunden." }; paths
     }
 
