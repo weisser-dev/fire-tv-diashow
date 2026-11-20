@@ -36,6 +36,7 @@ No OAuth secret or user token is stored in the repository. Google Photos API acc
 
 - Pushes and pull requests build a debug APK in GitHub Actions. The APK is available as a workflow artifact for 14 days.
 - Pushing a version tag such as `v0.1.0` builds a signed release APK and publishes it as a public GitHub Release asset.
+- The download page is published at https://weisser-dev.github.io/google-photos-carousel/ and links to the latest signed APK for Fire TV's Downloader app.
 - Before creating a release tag, configure these repository Actions secrets with a dedicated Android release keystore: `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, and `ANDROID_STORE_PASSWORD`. Keep a secure backup of that keystore; future app updates must use the same signing key.
 
 ## Private local files
