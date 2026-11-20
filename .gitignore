@@ -1,0 +1,24 @@
+# Private reference material. Never commit third-party APKs or decompiled sources.
+fotoo-*.apk
+fotoo-*.apk_Decompiler.com.zip
+**/fotoo-*.apk
+**/fotoo-*.apk_Decompiler.com.zip
+*.apk
+*.aab
+
+# Android / Gradle
+.gradle/
+**/build/
+local.properties
+*.iml
+.idea/
+.DS_Store
+
+# Local credentials and signing keys
+secrets.properties
+*.jks
+*.keystore
+
+# Decompiled third-party app source tree kept locally for reference
+fotoo-2-3-10014.apk_Decompiler.com/
+**/fotoo-2-3-10014.apk_Decompiler.com/
