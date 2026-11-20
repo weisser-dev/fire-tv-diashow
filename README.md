@@ -1,48 +1,55 @@
 # Photo Carousel
 
-An Android slideshow for a television that needs to show personal photos for hours without the screen going dark or the playback getting stuck. It supports local image files and a privacy-limited Google Photos selection, with shuffle, smooth fades, adjustable timing, and display rotation that leaves the original files untouched.
+Eine Android-App für eine dauerhaft laufende Fotoshow auf Android TV und Fire TV. Sie ist für Fernseher gedacht, auf denen Familienbilder stundenlang sichtbar bleiben sollen, ohne Dateien vorab passend drehen zu müssen.
 
-## What it does
+## Funktionen
 
-- **Local images:** choose multiple images using Android's file picker. The app keeps read access and remembers the selection on this device.
-- **Google Fotos:** authorize the Photos Picker API, show its selection link as a QR code, and import the photos selected on a phone. Selected images are cached in the app's private storage for playback.
-- **Playback:** continuous slideshow, 3–60 second interval, shuffle, next/previous controls, and a 700 ms crossfade.
-- **TV display:** keeps the screen awake during playback, hides system bars, and accepts remote arrow/enter/media keys. The image can be rotated 0°, 90°, 180°, or 270° independently of the source file.
+- **Lokale Bilder:** Mehrere Bilder aus dem Dateiauswahldialog wählen; Auswahl und Leseberechtigungen bleiben auf dem Gerät gespeichert.
+- **Google Fotos:** Verbindung über die Google Photos Ambient API. Der TV-Login zeigt einen QR-Code und Gerätecode; danach konfiguriert man die freigegebenen Alben in Google Fotos. Die App lädt die ausgewählten Bilder für eine stabile Wiedergabe lokal in ihren privaten Speicher.
+- **Diashow:** Shuffle, Bilddauer von 3 bis 60 Sekunden, nächste/zurück-Steuerung und weiche Übergänge.
+- **TV-Betrieb:** Bildschirm bleibt während der Wiedergabe aktiv; Vollbilddarstellung und Steuerung über Fernbedienung.
+- **Ausrichtung:** Bilder auf 0°, 90°, 180° oder 270° drehen, ohne Originaldateien zu verändern. So lassen sich auch quer ausgebende Fire-TV-Geräte an einen hochkant montierten Bildschirm anpassen.
+- **Browser-Demo:** [Interaktive Vorschau](https://weisser-dev.github.io/google-photos-carousel/) mit Landscape/Portrait, Übergängen, Dauer und Bildfüllung.
 
-The Google Photos Picker only returns items that the user explicitly selects. It does not let third-party apps silently browse a whole library or retrieve an album as a playlist. Google removed broad library read access in 2025. The app therefore imports a picked set of photos; it cannot sync an entire album automatically. The Picker API can present its selection link as a QR code. See [Google's API changes](https://developers.google.com/photos/support/updates), [Picker flow](https://developers.google.com/photos/picker/guides/get-started-picker), and [polling requirements](https://developers.google.com/photos/picker/reference/rest/v1/sessions).
+## Google Fotos einrichten
 
-## Build and install
+Die App verwendet die **Ambient API**, die für verbundene Bilderrahmen und TV-Geräte entwickelt wurde und die Auswahl von Medienquellen wie Alben unterstützt. Die frühere Picker-Integration ist entfernt.
 
-Requires JDK 17 and Android SDK platform 36. On macOS, set `ANDROID_HOME="$HOME/Library/Android/sdk"` if the SDK is installed in the default location.
+Für Google Fotos sind diese Schritte in Google Cloud erforderlich:
+
+1. Die **Google Photos Ambient API** im Projekt aktivieren.
+2. Einen OAuth-Client des Typs **TVs and Limited Input devices** anlegen. Ein Android-Client ist für den QR-/Gerätecode-Flow nicht geeignet.
+3. OAuth-Zustimmungsbildschirm und angeforderten Bereich `https://www.googleapis.com/auth/photosambient.mediaitems` konfigurieren.
+4. Für lokale Builds `AMBIENT_CLIENT_ID` und `AMBIENT_CLIENT_SECRET` als Umgebungsvariablen oder Gradle-Properties `ambientClientId` / `ambientClientSecret` bereitstellen.
+5. Für Release-Builds dieselben Werte als GitHub Actions Secrets `AMBIENT_CLIENT_ID` und `AMBIENT_CLIENT_SECRET` speichern. Signatur-Secrets sind zusätzlich nötig (siehe unten).
+
+Die Ambient API ist in der aktuell geprüften Cloud Console noch nicht aktiviert und dort ist noch kein TV-OAuth-Client eingerichtet. Solange das fehlt, funktionieren lokale Bilder; Google Fotos meldet in der App klar die fehlende Konfiguration. Google verlangt eine Prüfung, bevor eine öffentliche Ambient-Anwendung breit gestartet werden kann. Ein Client-Secret in einer Android-App lässt sich technisch aus dem APK extrahieren; es ist daher kein Geheimnis gegenüber App-Nutzern. Das Secret gehört dennoch nicht in Git oder öffentliche Workflow-Logs.
+
+Ambient verknüpft ein Gerät mit ausgewählten Medienquellen und erlaubt danach die Liste der freigegebenen Bilder abzurufen. Die App fragt die Gerätefreigabe ab und lädt die Medien während des Verbindungsablaufs. Für spätere Änderungen an der Albumauswahl lässt sich die Verbindung erneut starten.
+
+## Bauen und installieren
+
+Benötigt JDK 17 und Android SDK Platform 36. Auf macOS liegt das SDK üblicherweise unter `~/Library/Android/sdk`.
 
 ```sh
 ./gradlew assembleDebug
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Or open the repository in Android Studio and run the `app` configuration. Minimum Android version is Android 7.0 (API 24). Fire TV devices without Google Play services can use local images; Google authorization requires Google Play services and a configured OAuth client.
+Alternativ das Projekt in Android Studio öffnen und die `app`-Konfiguration starten. Mindestversion ist Android 7.0 (API 24). Fire-TV-Geräte ohne Google Play-Dienste können lokale Bilder verwenden; der Ambient Geräte-Login läuft über Google OAuth.
 
-## Configure Google Photos
+## CI, APK und GitHub Pages
 
-1. Create a Google Cloud project and enable the **Google Photos Picker API**.
-2. Configure the OAuth consent screen and create an **Android OAuth client** for application ID `dev.weisser.googlephotoscarousel`.
-3. Add the SHA-1 signing certificate fingerprints for the build variants you use. For local debug builds, run `./gradlew signingReport`. The current public release certificate fingerprint is `57:AD:6F:0B:BE:CD:2C:78:75:9A:E1:5A:D9:5D:8A:5B:23:67:C0:D9`.
-4. Publish the consent screen and complete Google's verification requirements before broad public use.
-5. Install the app on a device with Google Play services, authorize the Photos Picker scope, scan the on-screen QR code with a phone signed into the authorized Google account, select photos, and confirm the selection.
+- Pushes auf `main` und Pull Requests erstellen ein Debug-APK-Artefakt in GitHub Actions.
+- Ein Versionstag wie `v0.2.0` erstellt ein signiertes Release-APK und veröffentlicht es als öffentliches GitHub Release.
+- Die [Download- und Demo-Seite](https://weisser-dev.github.io/google-photos-carousel/) verweist auf die neueste APK. Downloader-Adresse: `https://github.com/weisser-dev/google-photos-carousel/releases/latest/download/app-release.apk`.
+- Android Signatur-Secrets: `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` und `ANDROID_STORE_PASSWORD`. Bei Folgeversionen immer denselben Keystore benutzen.
+- Ambient OAuth Secrets: `AMBIENT_CLIENT_ID` und `AMBIENT_CLIENT_SECRET`.
 
-No OAuth secret or user token is stored in the repository. Google Photos API access remains subject to Google's user data policies and the consent screen's publication status. See [PRIVACY.md](PRIVACY.md) for the app's data handling.
+## Private lokale Dateien
 
-## CI and public releases
+APK-Dateien, dekompilierte Drittanbieterquellen, Build-Ausgaben, Signaturschlüssel und OAuth-JSON-Dateien sind durch `.gitignore` ausgeschlossen. Die fünf Demo-Fotos unter `docs/demo/` sind eigens für die öffentliche Demo generierte Landschaftsbilder; private Testbilder bleiben außerhalb dieses Repositories.
 
-- Pushes and pull requests build a debug APK in GitHub Actions. The APK is available as a workflow artifact for 14 days.
-- Pushing a version tag such as `v0.1.0` builds a signed release APK and publishes it as a public GitHub Release asset.
-- The download page is published at https://weisser-dev.github.io/google-photos-carousel/ and links to the latest signed APK for Fire TV's Downloader app.
-- Before creating a release tag, configure these repository Actions secrets with a dedicated Android release keystore: `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, and `ANDROID_STORE_PASSWORD`. Keep a secure backup of that keystore; future app updates must use the same signing key.
+## Lizenz
 
-## Private local files
-
-APK files, decompiler archives, local build outputs, signing keys, and credentials are ignored by Git. The personal test photos used for local simulator checks are kept outside this repository and are never included in builds or releases.
-
-## License
-
-MIT. See [LICENSE](LICENSE).
+MIT. Siehe [LICENSE](LICENSE).

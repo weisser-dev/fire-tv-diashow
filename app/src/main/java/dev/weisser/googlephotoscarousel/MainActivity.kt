@@ -8,7 +8,6 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
-import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.animation.AnimatedContent
@@ -43,9 +42,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.lifecycleScope
 import coil.compose.AsyncImage
-import com.google.android.gms.auth.api.identity.AuthorizationRequest
-import com.google.android.gms.auth.api.identity.Identity
-import com.google.android.gms.common.api.Scope
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import kotlinx.coroutines.Job
@@ -57,32 +53,22 @@ import androidx.compose.ui.window.Dialog
 private val Ink = Color(0xFF10141B)
 private val SurfaceCard = Color(0xFF1B222C)
 private val Accent = Color(0xFFE8C98C)
-private const val PHOTOS_SCOPE = "https://www.googleapis.com/auth/photospicker.mediaitems.readonly"
-
 class MainActivity : ComponentActivity() {
-    private val pickerRepo by lazy { PhotosPickerRepository(this) }
-    private var googleToken by mutableStateOf<String?>(null)
+    private val ambientRepo by lazy { AmbientRepository(this) }
     private var googleError by mutableStateOf<String?>(null)
     private var pickerUri by mutableStateOf<String?>(null)
+    private var googleUserCode by mutableStateOf("")
     private var isImporting by mutableStateOf(false)
     private var importStatus by mutableStateOf("")
     private var importedFiles by mutableStateOf<List<String>>(emptyList())
     private var localPhotoUris by mutableStateOf<List<String>>(emptyList())
     private var importJob: Job? = null
-    private var activePickerSession: PickerSession? = null
+    private var googleFlowJob: Job? = null
     private var remoteKeyHandler: ((Int) -> Boolean)? = null
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         if (remoteKeyHandler?.invoke(keyCode) == true) return true
         return super.onKeyDown(keyCode, event)
-    }
-
-    private val googleResolution = registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
-        if (result.resultCode == RESULT_OK) {
-            runCatching { Identity.getAuthorizationClient(this).getAuthorizationResultFromIntent(result.data).accessToken }
-                .onSuccess { token -> if (token.isNullOrBlank()) googleError = "Google hat kein Zugriffstoken zurückgegeben." else startGooglePicker(token) }
-                .onFailure { googleError = it.message ?: "Die Google-Autorisierung ist fehlgeschlagen." }
-        }
     }
 
     private val photoChooser = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -210,7 +196,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     pickerUri?.let { url ->
-                    PickerQrDialog(url, importStatus, onCancel = { cancelGooglePicker() }, onDone = { pickerUri = null })
+                    PickerQrDialog(url, googleUserCode, importStatus, onCancel = { cancelGooglePicker() }, onDone = { pickerUri = null })
                     }
                     (googleError ?: message)?.let { text -> AlertDialog(onDismissRequest = { googleError = null; message = null }, title = { Text("Hinweis") }, text = { Text(text) }, confirmButton = { TextButton(onClick = { googleError = null; message = null }) { Text("OK") } }) }
                     if (showSettings) {
@@ -222,70 +208,37 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requestGoogleAccess() {
-        val request = AuthorizationRequest.builder()
-            .setRequestedScopes(listOf(Scope(PHOTOS_SCOPE)))
-            .build()
-        Identity.getAuthorizationClient(this).authorize(request)
-            .addOnSuccessListener { result ->
-                if (result.hasResolution()) {
-                    val pendingIntent = result.pendingIntent
-                    if (pendingIntent != null) googleResolution.launch(IntentSenderRequest.Builder(pendingIntent).build())
-                    else googleError = "Google-Anmeldung konnte nicht geöffnet werden."
-                } else {
-                    val token = result.accessToken
-                    if (token.isNullOrBlank()) googleError = "Google hat kein Zugriffstoken zurückgegeben." else startGooglePicker(token)
-                }
-            }
-            .addOnFailureListener { googleError = "Google-Zugriff fehlgeschlagen: ${it.localizedMessage ?: "Unbekannter Fehler"}" }
-    }
-
-    private fun startGooglePicker(token: String) {
-        googleToken = token
         isImporting = true
-        importStatus = "Google Photos Picker wird vorbereitet …"
-        lifecycleScope.launch {
-            runCatching { pickerRepo.createSession(token) }
-                .onSuccess { session ->
-                    isImporting = true
-                    importStatus = "Scanne den Code und bestätige deine Auswahl in Google Fotos …"
-                    pickerUri = session.uri
-                    activePickerSession = session
-                    importJob?.cancel()
-                    importJob = lifecycleScope.launch {
-                        runCatching { pickerRepo.waitAndDownload(token, session) }
-                            .onSuccess { paths ->
-                                runCatching { pickerRepo.deleteSession(token, session.id) }
-                                importedFiles = paths
-                                getSharedPreferences("carousel", MODE_PRIVATE).edit().putStringSet("google_photos", paths.toSet()).apply()
-                                isImporting = false
-                                importStatus = "${paths.size} Fotos übernommen."
-                                pickerUri = null
-                                activePickerSession = null
-                            }
-                            .onFailure {
-                                runCatching { pickerRepo.deleteSession(token, session.id) }
-                                isImporting = false
-                                pickerUri = null
-                                activePickerSession = null
-                                googleError = it.localizedMessage ?: "Fotos konnten nicht geladen werden."
-                            }
-                    }
-                }
-                .onFailure { isImporting = false; googleError = it.localizedMessage ?: "Google Photos Sitzung fehlgeschlagen." }
+        importStatus = "Google Ambient-Anmeldung wird vorbereitet …"
+        googleFlowJob?.cancel()
+        googleFlowJob = lifecycleScope.launch {
+            runCatching {
+                val auth = ambientRepo.requestDeviceCode()
+                pickerUri = auth.verificationUrl
+                googleUserCode = auth.userCode
+                importStatus = "Scanne den Code und gib den angezeigten Code ein …"
+                val token = ambientRepo.authorize(auth) { importStatus = it }
+                importStatus = "Google Fotos Gerät wird eingerichtet …"
+                val device = ambientRepo.createDevice(token)
+                pickerUri = device.settingsUri
+                googleUserCode = ""
+                importStatus = "Wähle auf dem Handy ein Album aus …"
+                ambientRepo.waitForSources(token, device) { importStatus = it }
+            }.onSuccess { paths ->
+                importedFiles = paths
+                getSharedPreferences("carousel", MODE_PRIVATE).edit().putStringSet("google_photos", paths.toSet()).apply()
+                isImporting = false; importStatus = "${paths.size} Fotos übernommen."; pickerUri = null
+            }.onFailure {
+                isImporting = false; pickerUri = null; googleError = it.localizedMessage ?: "Google Fotos konnte nicht verbunden werden."
+            }
         }
     }
 
     private fun cancelGooglePicker() {
-        val session = activePickerSession
-        val token = googleToken
-        importJob?.cancel()
-        importJob = null
-        activePickerSession = null
+        googleFlowJob?.cancel()
+        googleFlowJob = null
         pickerUri = null
         isImporting = false
-        if (session != null && token != null) {
-            lifecycleScope.launch { runCatching { pickerRepo.deleteSession(token, session.id) } }
-        }
     }
 
     private fun clearPhotos() {
@@ -363,7 +316,7 @@ private fun SettingsDialog(seconds: Int, orientation: Int, onSeconds: (Int) -> U
 }
 
 @Composable
-private fun PickerQrDialog(uri: String, status: String, onCancel: () -> Unit, onDone: () -> Unit) {
+private fun PickerQrDialog(uri: String, userCode: String, status: String, onCancel: () -> Unit, onDone: () -> Unit) {
     val bitmap = remember(uri) {
         runCatching {
             val matrix = QRCodeWriter().encode(uri, BarcodeFormat.QR_CODE, 640, 640)
@@ -374,9 +327,10 @@ private fun PickerQrDialog(uri: String, status: String, onCancel: () -> Unit, on
     }
     AlertDialog(onDismissRequest = onCancel, title = { Text("Mit Google Fotos verbinden") }, text = {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("Scanne den Code mit deinem Handy. Wähle die gewünschten Fotos in Google Fotos und bestätige dort.", textAlign = TextAlign.Center)
+            Text(if (userCode.isNotBlank()) "Scanne den Code am Handy und gib dort diesen Code ein:" else "Scanne den Code mit deinem Handy und wähle in Google Fotos das Album für diesen Fernseher.", textAlign = TextAlign.Center)
+            if (userCode.isNotBlank()) Text(userCode, color = Accent, fontWeight = FontWeight.Bold, fontSize = 22.sp, modifier = Modifier.padding(top = 8.dp))
             Spacer(Modifier.height(14.dp))
-            if (bitmap != null) Image(bitmap, "QR-Code für Google Photos Picker", modifier = Modifier.size(220.dp))
+            if (bitmap != null) Image(bitmap, "QR-Code für Google Photos Ambient", modifier = Modifier.size(220.dp))
             Spacer(Modifier.height(8.dp))
             Text(status.ifBlank { "Nach der Auswahl tippe auf Fertig." }, fontSize = 12.sp, color = Color.Gray, textAlign = TextAlign.Center)
         }
