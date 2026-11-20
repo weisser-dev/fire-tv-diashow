@@ -61,6 +61,7 @@ import coil.compose.AsyncImage
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
@@ -74,9 +75,12 @@ private val RemoteFocus = Color(0xFF42D9FF)
 private val RemoteFocusSurface = Color(0xFF153744)
 class MainActivity : ComponentActivity() {
     private val ambientRepo by lazy { AmbientRepository(this) }
+    private val pickerRepo by lazy { PickerRepository(this) }
     private var googleError by mutableStateOf<String?>(null)
     private var pickerUri by mutableStateOf<String?>(null)
     private var googleUserCode by mutableStateOf("")
+    private var pickerApiFlow by mutableStateOf(false)
+    private var qrDoneSelected by mutableStateOf(false)
     private var isImporting by mutableStateOf(false)
     private var importStatus by mutableStateOf("")
     private var importedFiles by mutableStateOf<List<String>>(emptyList())
@@ -164,8 +168,9 @@ class MainActivity : ComponentActivity() {
             var playing by remember { mutableStateOf(false) }
             var index by remember { mutableIntStateOf(0) }
             var showSettings by remember { mutableStateOf(false) }
+            var showGoogleSourceDialog by remember { mutableStateOf(false) }
+            var googleChoiceSelected by remember { mutableIntStateOf(0) }
             var setupConfirmSelected by remember { mutableStateOf(false) }
-            var qrDoneSelected by remember { mutableStateOf(false) }
             var sourceCardFocus by remember { mutableIntStateOf(-1) }
             var focusedSettingsNode by remember { mutableIntStateOf(0) }
             var rotationBeforeSettings by remember { mutableIntStateOf(displayRotation) }
@@ -179,7 +184,7 @@ class MainActivity : ComponentActivity() {
             val images = remember(localPhotos, importedFiles) { (localPhotos.map { "uri:$it" } + importedFiles.map { "file:$it" }).distinct() }
 
             MaterialTheme(colorScheme = darkColorScheme(primary = Accent, background = Ink, surface = SurfaceCard, onBackground = Color.White, onSurface = Color.White)) {
-                DisposableEffect(playing, images.size, orientationChosen, displayRotation, setupConfirmSelected, sourceCardFocus, focusedSettingsNode, showSettings, pickerUri, googleError, message) {
+                DisposableEffect(playing, images.size, orientationChosen, displayRotation, setupConfirmSelected, sourceCardFocus, focusedSettingsNode, showSettings, showGoogleSourceDialog, googleChoiceSelected, pickerUri, googleError, message) {
                     remoteKeyHandler = when {
                         !orientationChosen -> { code ->
                             when (code) {
@@ -194,6 +199,18 @@ class MainActivity : ComponentActivity() {
                                         displayDirectionForKeys = displayRotation
                                         setupConfirmSelected = false
                                     }
+                                    true
+                                }
+                                else -> false
+                            }
+                        }
+                        showGoogleSourceDialog -> { code ->
+                            when (code) {
+                                KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_LEFT -> { googleChoiceSelected = 0; true }
+                                KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_RIGHT -> { googleChoiceSelected = 1; true }
+                                KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_SPACE -> {
+                                    showGoogleSourceDialog = false
+                                    if (googleChoiceSelected == 0) requestGooglePickerAccess() else requestGoogleAccess()
                                     true
                                 }
                                 else -> false
@@ -274,7 +291,7 @@ class MainActivity : ComponentActivity() {
                                 KeyEvent.KEYCODE_DPAD_RIGHT -> { if (sourceCardFocus == 0) googleSourceFocusRequester.requestFocus(); true }
                                 KeyEvent.KEYCODE_DPAD_LEFT -> { if (sourceCardFocus == 1) localSourceFocusRequester.requestFocus(); true }
                                 KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_SPACE -> {
-                                    if (sourceCardFocus == 0) photoChooser.launch(arrayOf("image/*")) else requestGoogleAccess()
+                                    if (sourceCardFocus == 0) photoChooser.launch(arrayOf("image/*")) else { googleChoiceSelected = 0; showGoogleSourceDialog = true }
                                     true
                                 }
                                 else -> false
@@ -318,6 +335,7 @@ class MainActivity : ComponentActivity() {
                     displayDirectionForKeys = rotationBeforeSettings
                     showSettings = false
                 }
+                BackHandler(showGoogleSourceDialog) { showGoogleSourceDialog = false }
                 BackHandler(pickerUri != null) { cancelGooglePicker() }
                 BackHandler(!orientationChosen) {
                     displayRotation = 0
@@ -332,8 +350,8 @@ class MainActivity : ComponentActivity() {
                         runCatching { localSourceFocusRequester.requestFocus() }
                     }
                 }
-                LaunchedEffect(showSettings, pickerUri, googleError, message, orientationChosen) {
-                    if (showSettings || pickerUri != null || googleError != null || message != null || !orientationChosen) {
+                LaunchedEffect(showSettings, showGoogleSourceDialog, pickerUri, googleError, message, orientationChosen) {
+                    if (showSettings || showGoogleSourceDialog || pickerUri != null || googleError != null || message != null || !orientationChosen) {
                         delay(40)
                         focusManager.clearFocus(force = true)
                     }
@@ -350,7 +368,7 @@ class MainActivity : ComponentActivity() {
                             .graphicsLayer { rotationZ = displayRotation.toFloat() }
                             .background(Ink)
                     ) {
-                    val modalVisible = showSettings || pickerUri != null || googleError != null || message != null || !orientationChosen
+                    val modalVisible = showSettings || showGoogleSourceDialog || pickerUri != null || googleError != null || message != null || !orientationChosen
                     if (playing && images.isNotEmpty()) {
                         PlaybackView(images, index, orientation, panZoom, seconds, playing, onPause = { playing = false }, onNext = { index = (index + 1) % images.size }, onPrevious = { index = (index - 1 + images.size) % images.size })
                     } else if (modalVisible) {
@@ -398,7 +416,7 @@ class MainActivity : ComponentActivity() {
                             Spacer(Modifier.height(10.dp))
                             Row(Modifier.fillMaxWidth().focusGroup(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 SourceCard("Local images", "Fotos von diesem Gerät", Icons.Default.FolderOpen, Modifier.weight(1f).focusRequester(localSourceFocusRequester), count = localPhotos.size, onClick = { photoChooser.launch(arrayOf("image/*")) }, onFocusChange = { if (it) sourceCardFocus = 0 else if (sourceCardFocus == 0) sourceCardFocus = -1 })
-                                SourceCard("Google Fotos", "Sicher per QR auswählen", Icons.Default.Cloud, Modifier.weight(1f).focusRequester(googleSourceFocusRequester), count = importedFiles.size, onClick = { requestGoogleAccess() }, onFocusChange = { if (it) sourceCardFocus = 1 else if (sourceCardFocus == 1) sourceCardFocus = -1 })
+                                SourceCard("Google Fotos", "Picker oder Ambient", Icons.Default.Cloud, Modifier.weight(1f).focusRequester(googleSourceFocusRequester), count = importedFiles.size, onClick = { googleChoiceSelected = 0; showGoogleSourceDialog = true }, onFocusChange = { if (it) sourceCardFocus = 1 else if (sourceCardFocus == 1) sourceCardFocus = -1 })
                             }
                             if (isImporting) {
                                 LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 12.dp), color = Accent)
@@ -457,7 +475,17 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                     pickerUri?.let { url ->
-                        PickerQrDialog(url, googleUserCode, importStatus, qrDoneSelected, onCancel = { cancelGooglePicker() }, onDone = { pickerUri = null })
+                        PickerQrDialog(url, googleUserCode, importStatus, qrDoneSelected, pickerApiFlow, onCancel = { cancelGooglePicker() }, onDone = { pickerUri = null })
+                    }
+                    if (showGoogleSourceDialog) {
+                        GoogleSourceDialog(
+                            selected = googleChoiceSelected,
+                            onSelect = { choice ->
+                                showGoogleSourceDialog = false
+                                if (choice == 0) requestGooglePickerAccess() else requestGoogleAccess()
+                            },
+                            onCancel = { showGoogleSourceDialog = false }
+                        )
                     }
                     (googleError ?: message)?.let { text -> InlineMessageDialog(text) { googleError = null; message = null } }
                     if (showSettings) {
@@ -551,6 +579,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requestGoogleAccess() {
+        pickerApiFlow = false
         isImporting = true
         importStatus = "Google Ambient-Anmeldung wird vorbereitet …"
         googleFlowJob?.cancel()
@@ -571,13 +600,48 @@ class MainActivity : ComponentActivity() {
                 importedFiles = paths
                 getSharedPreferences("carousel", MODE_PRIVATE).edit().putStringSet("google_photos", paths.toSet()).apply()
                 isImporting = false; importStatus = "${paths.size} Fotos übernommen."; pickerUri = null
-            }.onFailure {
+            }.onFailure { error ->
                 isImporting = false
                 pickerUri = null
-                val detail = it.localizedMessage.orEmpty()
+                if (error is CancellationException) return@launch
+                val detail = error.localizedMessage.orEmpty()
                 googleError = if (detail.contains("permission", ignoreCase = true) || detail.contains("PERMISSION_DENIED", ignoreCase = true)) {
                     "Google hat den Zugriff auf die Ambient API für dieses Projekt noch nicht freigegeben. Laut Google muss das Projekt zuerst ins Google Photos Partner Program aufgenommen werden. OAuth-Client und API-Aktivierung allein reichen nicht.\n\nAntrag: developers.google.com/photos/partner-program/overview"
                 } else detail.ifBlank { "Google Fotos konnte nicht verbunden werden." }
+            }
+        }
+    }
+
+    private fun requestGooglePickerAccess() {
+        pickerApiFlow = true
+        isImporting = true
+        qrDoneSelected = false
+        importStatus = "Google-Picker-Anmeldung wird vorbereitet …"
+        googleFlowJob?.cancel()
+        googleFlowJob = lifecycleScope.launch {
+            runCatching {
+                val auth = pickerRepo.requestDeviceCode()
+                pickerUri = auth.verificationUrl
+                googleUserCode = auth.userCode
+                importStatus = "Scanne den Code und gib den angezeigten Code auf dem Handy ein …"
+                val token = pickerRepo.authorize(auth) { importStatus = it }
+                importStatus = "Google-Fotoauswahl wird erstellt …"
+                val session = pickerRepo.createSession(token)
+                pickerUri = session.uri
+                googleUserCode = ""
+                importStatus = "Wähle Fotos in Google Fotos aus …"
+                pickerRepo.waitAndDownload(token, session) { importStatus = it }
+            }.onSuccess { paths ->
+                importedFiles = paths
+                getSharedPreferences("carousel", MODE_PRIVATE).edit().putStringSet("google_photos", paths.toSet()).apply()
+                isImporting = false
+                importStatus = "${paths.size} Fotos übernommen."
+                pickerUri = null
+            }.onFailure { error ->
+                isImporting = false
+                pickerUri = null
+                if (error is CancellationException) return@launch
+                googleError = error.localizedMessage?.takeIf(String::isNotBlank) ?: "Google Fotos konnte nicht verbunden werden."
             }
         }
     }
@@ -600,6 +664,39 @@ class MainActivity : ComponentActivity() {
         File(filesDir, "google-photos").listFiles()?.forEach { it.delete() }
     }
 
+}
+
+@Composable
+private fun GoogleSourceDialog(selected: Int, onSelect: (Int) -> Unit, onCancel: () -> Unit) {
+    Box(Modifier.fillMaxSize().background(Color(0xCC000000)).focusGroup(), contentAlignment = Alignment.Center) {
+        Surface(Modifier.fillMaxWidth().widthIn(max = 560.dp), color = SurfaceCard, shape = RoundedCornerShape(22.dp)) {
+            Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Google Fotos verbinden", color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.SemiBold)
+                Text("Wähle den Zugriff für diese Diashow.", color = Color(0xFFCFD5DD), modifier = Modifier.padding(top = 8.dp, bottom = 18.dp))
+                Button(
+                    onClick = { onSelect(0) },
+                    modifier = Modifier.fillMaxWidth().then(if (selected == 0) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(14.dp)) else Modifier),
+                    colors = ButtonDefaults.buttonColors(containerColor = if (selected == 0) RemoteFocusSurface else Color(0xFF303A47), contentColor = Color.White)
+                ) {
+                    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                        Text("Google Fotos auswählen", fontWeight = FontWeight.Bold)
+                        Text("Picker · direkt verfügbar · Fotos einzeln wählen", fontSize = 12.sp, color = Color(0xFFD3DCE6))
+                    }
+                }
+                Button(
+                    onClick = { onSelect(1) },
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp).then(if (selected == 1) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(14.dp)) else Modifier),
+                    colors = ButtonDefaults.buttonColors(containerColor = if (selected == 1) RemoteFocusSurface else Color(0xFF303A47), contentColor = Color.White)
+                ) {
+                    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                        Text("Ambient-Gerät verbinden", fontWeight = FontWeight.Bold)
+                        Text("Album-Auswahl · erst nach Google-Partnerfreigabe nutzbar", fontSize = 12.sp, color = Color(0xFFD3DCE6))
+                    }
+                }
+                TextButton(onClick = onCancel, modifier = Modifier.padding(top = 8.dp)) { Text("Abbrechen", color = Accent) }
+            }
+        }
+    }
 }
 
 @Composable
@@ -856,7 +953,7 @@ private fun InlineMessageDialog(message: String, onClose: () -> Unit) {
 }
 
 @Composable
-private fun PickerQrDialog(uri: String, userCode: String, status: String, doneSelected: Boolean, onCancel: () -> Unit, onDone: () -> Unit) {
+private fun PickerQrDialog(uri: String, userCode: String, status: String, doneSelected: Boolean, pickerApi: Boolean, onCancel: () -> Unit, onDone: () -> Unit) {
     val cancelRequester = remember { FocusRequester() }
     var cancelFocused by remember { mutableStateOf(false) }
     var doneFocused by remember { mutableStateOf(false) }
@@ -873,7 +970,14 @@ private fun PickerQrDialog(uri: String, userCode: String, status: String, doneSe
         Surface(Modifier.fillMaxWidth().widthIn(max = 560.dp).heightIn(max = 900.dp), color = SurfaceCard, shape = RoundedCornerShape(24.dp)) {
             Column(Modifier.verticalScroll(rememberScrollState()).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("Mit Google Fotos verbinden", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-                Text(if (userCode.isNotBlank()) "Schritt 1 von 2: Scanne den Code am Handy und gib dort diesen Code ein. Danach erscheint hier ein zweiter Code für die Albumauswahl." else "Schritt 2 von 2: Scanne den Code mit deinem Handy und wähle in Google Fotos das Album für diesen Fernseher.", textAlign = TextAlign.Center, color = Color(0xFFCFD5DD), modifier = Modifier.padding(top = 12.dp))
+                Text(
+                    when {
+                        userCode.isNotBlank() -> "Schritt 1 von 2: Öffne den Link am Handy und gib dort den angezeigten Code ein. Danach erscheint hier die Fotoauswahl."
+                        pickerApi -> "Scanne den Code mit deinem Handy und wähle die Fotos aus, die auf dem Fernseher angezeigt werden sollen. Ausgewählte Videos werden übersprungen."
+                        else -> "Scanne den Code mit deinem Handy und wähle in Google Fotos das Album für diesen Fernseher aus."
+                    },
+                    textAlign = TextAlign.Center, color = Color(0xFFCFD5DD), modifier = Modifier.padding(top = 12.dp)
+                )
                 if (userCode.isNotBlank()) Text(userCode, color = Accent, fontWeight = FontWeight.Bold, fontSize = 22.sp, modifier = Modifier.padding(top = 8.dp))
                 Spacer(Modifier.height(14.dp))
                 if (bitmap != null) Image(bitmap, "QR-Code für Google Photos Ambient", modifier = Modifier.size(220.dp))
