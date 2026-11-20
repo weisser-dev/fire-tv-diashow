@@ -6,7 +6,7 @@
     <application
         android:allowBackup="false"
         android:banner="@drawable/tv_banner"
-        android:icon="@drawable/ic_photo_carousel"
+        android:icon="@drawable/app_icon"
         android:label="Photo Carousel"
         android:theme="@style/Theme.PhotoCarousel"
         android:usesCleartextTraffic="false">
