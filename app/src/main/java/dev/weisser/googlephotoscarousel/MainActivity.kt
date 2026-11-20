@@ -138,6 +138,7 @@ class MainActivity : ComponentActivity() {
             var sourceCardFocus by remember { mutableIntStateOf(-1) }
             var focusedSettingsNode by remember { mutableIntStateOf(0) }
             var mainFocusNode by remember { mutableIntStateOf(1) }
+            var focusRestoreNode by remember { mutableIntStateOf(1) }
             var rotationBeforeSettings by remember { mutableIntStateOf(displayRotation) }
             var message by remember { mutableStateOf<String?>(null) }
             val context = LocalContext.current
@@ -154,6 +155,7 @@ class MainActivity : ComponentActivity() {
             MaterialTheme(colorScheme = darkColorScheme(primary = Accent, background = Ink, surface = SurfaceCard, onBackground = Color.White, onSurface = Color.White)) {
                 fun focusMainNode(node: Int) {
                     mainFocusNode = node
+                    if (node in 1..3) focusRestoreNode = node
                     runCatching {
                         when (node) {
                             0 -> settingsFocusRequester.requestFocus()
@@ -162,6 +164,46 @@ class MainActivity : ComponentActivity() {
                             3 -> updateCheckFocusRequester.requestFocus()
                         }
                     }
+                }
+                fun navigateMainFocus(code: Int, from: Int = mainFocusNode): Boolean {
+                    if (code !in setOf(KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT)) return false
+                    val next = if (portraitUi) {
+                        when (from) {
+                            0 -> if (code == KeyEvent.KEYCODE_DPAD_DOWN) 1 else null
+                            1 -> when (code) {
+                                KeyEvent.KEYCODE_DPAD_UP -> 0
+                                KeyEvent.KEYCODE_DPAD_DOWN -> 2
+                                else -> null
+                            }
+                            2 -> when (code) {
+                                KeyEvent.KEYCODE_DPAD_UP -> 1
+                                KeyEvent.KEYCODE_DPAD_DOWN -> 3
+                                else -> null
+                            }
+                            3 -> if (code == KeyEvent.KEYCODE_DPAD_UP) 2 else null
+                            else -> null
+                        }
+                    } else {
+                        when (from) {
+                            0 -> if (code == KeyEvent.KEYCODE_DPAD_DOWN) 1 else null
+                            1 -> when (code) {
+                                KeyEvent.KEYCODE_DPAD_RIGHT -> 2
+                                KeyEvent.KEYCODE_DPAD_UP -> 0
+                                KeyEvent.KEYCODE_DPAD_DOWN -> 3
+                                else -> null
+                            }
+                            2 -> when (code) {
+                                KeyEvent.KEYCODE_DPAD_LEFT -> 1
+                                KeyEvent.KEYCODE_DPAD_UP -> 0
+                                KeyEvent.KEYCODE_DPAD_DOWN -> 3
+                                else -> null
+                            }
+                            3 -> if (code == KeyEvent.KEYCODE_DPAD_UP) 2 else null
+                            else -> null
+                        }
+                    }
+                    if (next != null) focusMainNode(next) else if (from != mainFocusNode) focusMainNode(from)
+                    return true
                 }
                 DisposableEffect(playing, images.size, orientationChosen, displayRotation, setupConfirmSelected, sourceCardFocus, focusedSettingsNode, mainFocusNode, showSettings, pickerUri, googleError, message) {
                     remoteKeyHandler = when {
@@ -183,7 +225,9 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                         googleError != null || message != null -> { code ->
-                            when (code) {
+                            if (googleError == null && message == null) {
+                                navigateMainFocus(code, focusRestoreNode)
+                            } else when (code) {
                                 KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_DOWN,
                                 KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_UP -> true
                                 KeyEvent.KEYCODE_BACK -> { googleError = null; message = null; true }
@@ -256,36 +300,7 @@ class MainActivity : ComponentActivity() {
                             when (code) {
                                 KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_LEFT,
                                 KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                                    if (portraitUi) {
-                                        when (mainFocusNode) {
-                                            0 -> if (code == KeyEvent.KEYCODE_DPAD_DOWN) focusMainNode(1)
-                                            1 -> when (code) {
-                                                KeyEvent.KEYCODE_DPAD_UP -> focusMainNode(0)
-                                                KeyEvent.KEYCODE_DPAD_DOWN -> focusMainNode(2)
-                                            }
-                                            2 -> when (code) {
-                                                KeyEvent.KEYCODE_DPAD_UP -> focusMainNode(1)
-                                                KeyEvent.KEYCODE_DPAD_DOWN -> focusMainNode(3)
-                                            }
-                                            3 -> if (code == KeyEvent.KEYCODE_DPAD_UP) focusMainNode(2)
-                                        }
-                                    } else {
-                                        when (mainFocusNode) {
-                                            0 -> if (code == KeyEvent.KEYCODE_DPAD_DOWN) focusMainNode(1)
-                                            1 -> when (code) {
-                                                KeyEvent.KEYCODE_DPAD_RIGHT -> focusMainNode(2)
-                                                KeyEvent.KEYCODE_DPAD_UP -> focusMainNode(0)
-                                                KeyEvent.KEYCODE_DPAD_DOWN -> focusMainNode(3)
-                                            }
-                                            2 -> when (code) {
-                                                KeyEvent.KEYCODE_DPAD_LEFT -> focusMainNode(1)
-                                                KeyEvent.KEYCODE_DPAD_UP -> focusMainNode(0)
-                                                KeyEvent.KEYCODE_DPAD_DOWN -> focusMainNode(3)
-                                            }
-                                            3 -> if (code == KeyEvent.KEYCODE_DPAD_UP) focusMainNode(2)
-                                        }
-                                    }
-                                    true
+                                    navigateMainFocus(code)
                                 }
                                 KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_SPACE -> {
                                     when (mainFocusNode) {
@@ -352,16 +367,12 @@ class MainActivity : ComponentActivity() {
                     orientationChosen = true
                 }
                 BackHandler(googleError != null || message != null) { googleError = null; message = null }
-                LaunchedEffect(showSettings, orientationChosen) {
-                    if (!showSettings && orientationChosen) {
-                        delay(100)
-                        runCatching { localSourceFocusRequester.requestFocus() }
-                    }
-                }
                 LaunchedEffect(showSettings, pickerUri, googleError, message, orientationChosen) {
-                    if (showSettings || pickerUri != null || googleError != null || message != null || !orientationChosen) {
-                        delay(40)
+                    val modalVisible = showSettings || pickerUri != null || googleError != null || message != null || !orientationChosen
+                    if (modalVisible) {
                         focusManager.clearFocus(force = true)
+                    } else {
+                        focusMainNode(focusRestoreNode)
                     }
                 }
 
@@ -428,13 +439,13 @@ class MainActivity : ComponentActivity() {
                             Spacer(Modifier.height(10.dp))
                             if (portraitUi) {
                                 Column(Modifier.fillMaxWidth().focusGroup(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    SourceCard("Dateien", "Fotos von diesem Gerät", Icons.Default.FolderOpen, Modifier.fillMaxWidth().focusRequester(localSourceFocusRequester), count = localPhotos.size, onClick = { photoChooser.launch(arrayOf("image/*")) }, onFocusChange = { if (it) { sourceCardFocus = 0; mainFocusNode = 1 } else if (sourceCardFocus == 0) { sourceCardFocus = -1; if (mainFocusNode == 1) mainFocusNode = -1 } })
-                                    SourceCard("Google Fotos", "Picker · Verbindung pausiert", Icons.Default.Cloud, Modifier.fillMaxWidth().focusRequester(googleSourceFocusRequester), count = importedFiles.size, onClick = { requestGooglePickerAccess() }, onFocusChange = { if (it) { sourceCardFocus = 1; mainFocusNode = 2 } else if (sourceCardFocus == 1) { sourceCardFocus = -1; if (mainFocusNode == 2) mainFocusNode = -1 } })
+                                    SourceCard("Dateien", "Fotos von diesem Gerät", Icons.Default.FolderOpen, Modifier.fillMaxWidth().focusRequester(localSourceFocusRequester), count = localPhotos.size, onClick = { photoChooser.launch(arrayOf("image/*")) }, onFocusChange = { if (it) { sourceCardFocus = 0; mainFocusNode = 1; focusRestoreNode = 1 } else if (sourceCardFocus == 0) sourceCardFocus = -1 })
+                                    SourceCard("Google Fotos", "Picker · Verbindung pausiert", Icons.Default.Cloud, Modifier.fillMaxWidth().focusRequester(googleSourceFocusRequester), count = importedFiles.size, onClick = { requestGooglePickerAccess() }, onFocusChange = { if (it) { sourceCardFocus = 1; mainFocusNode = 2; focusRestoreNode = 2 } else if (sourceCardFocus == 1) sourceCardFocus = -1 })
                                 }
                             } else {
                                 Row(Modifier.fillMaxWidth().focusGroup(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    SourceCard("Dateien", "Fotos von diesem Gerät", Icons.Default.FolderOpen, Modifier.weight(1f).focusRequester(localSourceFocusRequester), count = localPhotos.size, onClick = { photoChooser.launch(arrayOf("image/*")) }, onFocusChange = { if (it) { sourceCardFocus = 0; mainFocusNode = 1 } else if (sourceCardFocus == 0) { sourceCardFocus = -1; if (mainFocusNode == 1) mainFocusNode = -1 } })
-                                    SourceCard("Google Fotos", "Picker · Verbindung pausiert", Icons.Default.Cloud, Modifier.weight(1f).focusRequester(googleSourceFocusRequester), count = importedFiles.size, onClick = { requestGooglePickerAccess() }, onFocusChange = { if (it) { sourceCardFocus = 1; mainFocusNode = 2 } else if (sourceCardFocus == 1) { sourceCardFocus = -1; if (mainFocusNode == 2) mainFocusNode = -1 } })
+                                    SourceCard("Dateien", "Fotos von diesem Gerät", Icons.Default.FolderOpen, Modifier.weight(1f).focusRequester(localSourceFocusRequester), count = localPhotos.size, onClick = { photoChooser.launch(arrayOf("image/*")) }, onFocusChange = { if (it) { sourceCardFocus = 0; mainFocusNode = 1; focusRestoreNode = 1 } else if (sourceCardFocus == 0) sourceCardFocus = -1 })
+                                    SourceCard("Google Fotos", "Picker · Verbindung pausiert", Icons.Default.Cloud, Modifier.weight(1f).focusRequester(googleSourceFocusRequester), count = importedFiles.size, onClick = { requestGooglePickerAccess() }, onFocusChange = { if (it) { sourceCardFocus = 1; mainFocusNode = 2; focusRestoreNode = 2 } else if (sourceCardFocus == 1) sourceCardFocus = -1 })
                                 }
                             }
                             if (isImporting) {
