@@ -9,7 +9,8 @@
         android:icon="@mipmap/app_icon"
         android:label="Photo Carousel"
         android:theme="@style/Theme.PhotoCarousel"
-        android:usesCleartextTraffic="false">
+        android:usesCleartextTraffic="false"
+        android:networkSecurityConfig="@xml/network_security_config">
         <activity
             android:name=".MainActivity"
             android:banner="@drawable/tv_banner"

@@ -79,6 +79,7 @@ class MainActivity : ComponentActivity() {
     private var pickerUri by mutableStateOf<String?>(null)
     private var googleUserCode by mutableStateOf("")
     private var pickerApiFlow by mutableStateOf(false)
+    private var browserAuthPending by mutableStateOf(false)
     private var qrDoneSelected by mutableStateOf(false)
     private var isImporting by mutableStateOf(false)
     private var importStatus by mutableStateOf("")
@@ -86,6 +87,7 @@ class MainActivity : ComponentActivity() {
     private var localPhotoUris by mutableStateOf<List<String>>(emptyList())
     private var importJob: Job? = null
     private var googleFlowJob: Job? = null
+    private var authBridge: LocalGoogleAuthBridge? = null
     private var remoteKeyHandler: ((Int) -> Boolean)? = null
     private val remoteHandledKeys = mutableSetOf<Int>()
     private var updateRelease by mutableStateOf<AppRelease?>(null)
@@ -205,7 +207,7 @@ class MainActivity : ComponentActivity() {
                     if (next != null) focusMainNode(next) else if (from != mainFocusNode) focusMainNode(from)
                     return true
                 }
-                DisposableEffect(playing, images.size, orientationChosen, displayRotation, setupConfirmSelected, sourceCardFocus, focusedSettingsNode, mainFocusNode, showSettings, pickerUri, googleError, message) {
+                DisposableEffect(playing, images.size, orientationChosen, displayRotation, setupConfirmSelected, sourceCardFocus, focusedSettingsNode, mainFocusNode, showSettings, pickerUri, googleError, message, browserAuthPending) {
                     remoteKeyHandler = when {
                         !orientationChosen -> { code ->
                             when (code) {
@@ -221,6 +223,15 @@ class MainActivity : ComponentActivity() {
                                     }
                                     true
                                 }
+                                else -> false
+                            }
+                        }
+                        browserAuthPending -> { code ->
+                            when (code) {
+                                KeyEvent.KEYCODE_BACK -> { cancelGooglePicker(); true }
+                                KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_DOWN,
+                                KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_UP -> true
+                                KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_SPACE -> { cancelGooglePicker(); true }
                                 else -> false
                             }
                         }
@@ -361,14 +372,15 @@ class MainActivity : ComponentActivity() {
                     showSettings = false
                 }
                 BackHandler(pickerUri != null) { cancelGooglePicker() }
+                BackHandler(browserAuthPending) { cancelGooglePicker() }
                 BackHandler(!orientationChosen) {
                     displayRotation = 0
                     prefs.edit().putInt("display_rotation", 0).apply()
                     orientationChosen = true
                 }
                 BackHandler(googleError != null || message != null) { googleError = null; message = null }
-                LaunchedEffect(showSettings, pickerUri, googleError, message, orientationChosen) {
-                    val modalVisible = showSettings || pickerUri != null || googleError != null || message != null || !orientationChosen
+                LaunchedEffect(showSettings, pickerUri, googleError, message, orientationChosen, browserAuthPending) {
+                    val modalVisible = showSettings || pickerUri != null || googleError != null || message != null || !orientationChosen || browserAuthPending
                     if (modalVisible) {
                         focusManager.clearFocus(force = true)
                     } else {
@@ -440,12 +452,12 @@ class MainActivity : ComponentActivity() {
                             if (portraitUi) {
                                 Column(Modifier.fillMaxWidth().focusGroup(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                     SourceCard("Dateien", "Fotos von diesem Gerät", Icons.Default.FolderOpen, Modifier.fillMaxWidth().focusRequester(localSourceFocusRequester), count = localPhotos.size, onClick = { photoChooser.launch(arrayOf("image/*")) }, onFocusChange = { if (it) { sourceCardFocus = 0; mainFocusNode = 1; focusRestoreNode = 1 } else if (sourceCardFocus == 0) sourceCardFocus = -1 })
-                                    SourceCard("Google Fotos", "Picker · Verbindung pausiert", Icons.Default.Cloud, Modifier.fillMaxWidth().focusRequester(googleSourceFocusRequester), count = importedFiles.size, onClick = { requestGooglePickerAccess() }, onFocusChange = { if (it) { sourceCardFocus = 1; mainFocusNode = 2; focusRestoreNode = 2 } else if (sourceCardFocus == 1) sourceCardFocus = -1 })
+                                    SourceCard("Google Fotos", "Im TV-Browser anmelden", Icons.Default.Cloud, Modifier.fillMaxWidth().focusRequester(googleSourceFocusRequester), count = importedFiles.size, onClick = { requestGooglePickerAccess() }, onFocusChange = { if (it) { sourceCardFocus = 1; mainFocusNode = 2; focusRestoreNode = 2 } else if (sourceCardFocus == 1) sourceCardFocus = -1 })
                                 }
                             } else {
                                 Row(Modifier.fillMaxWidth().focusGroup(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                     SourceCard("Dateien", "Fotos von diesem Gerät", Icons.Default.FolderOpen, Modifier.weight(1f).focusRequester(localSourceFocusRequester), count = localPhotos.size, onClick = { photoChooser.launch(arrayOf("image/*")) }, onFocusChange = { if (it) { sourceCardFocus = 0; mainFocusNode = 1; focusRestoreNode = 1 } else if (sourceCardFocus == 0) sourceCardFocus = -1 })
-                                    SourceCard("Google Fotos", "Picker · Verbindung pausiert", Icons.Default.Cloud, Modifier.weight(1f).focusRequester(googleSourceFocusRequester), count = importedFiles.size, onClick = { requestGooglePickerAccess() }, onFocusChange = { if (it) { sourceCardFocus = 1; mainFocusNode = 2; focusRestoreNode = 2 } else if (sourceCardFocus == 1) sourceCardFocus = -1 })
+                                    SourceCard("Google Fotos", "Im TV-Browser anmelden", Icons.Default.Cloud, Modifier.weight(1f).focusRequester(googleSourceFocusRequester), count = importedFiles.size, onClick = { requestGooglePickerAccess() }, onFocusChange = { if (it) { sourceCardFocus = 1; mainFocusNode = 2; focusRestoreNode = 2 } else if (sourceCardFocus == 1) sourceCardFocus = -1 })
                                 }
                             }
                             if (isImporting) {
@@ -514,6 +526,7 @@ class MainActivity : ComponentActivity() {
                     pickerUri?.let { url ->
                         PickerQrDialog(url, googleUserCode, importStatus, qrDoneSelected, pickerApiFlow, onCancel = { cancelGooglePicker() }, onDone = { pickerUri = null })
                     }
+                    if (browserAuthPending) BrowserAuthDialog(onCancel = { cancelGooglePicker() })
                     (googleError ?: message)?.let { text -> InlineMessageDialog(text) { googleError = null; message = null } }
                     if (showSettings) {
                         SettingsDialog(
@@ -534,6 +547,13 @@ class MainActivity : ComponentActivity() {
             }
         }
         checkForUpdates()
+    }
+
+    override fun onDestroy() {
+        authBridge?.stop()
+        authBridge = null
+        googleFlowJob?.cancel()
+        super.onDestroy()
     }
 
     private fun checkForUpdates(force: Boolean = false) {
@@ -610,12 +630,58 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requestGooglePickerAccess() {
-        googleError = "Google Fotos ist über den TV-QR-Login derzeit nicht verfügbar. Google blockiert den Photos-Picker-Zugriff im Gerätecode-Flow. Ambient ist deaktiviert; vorhandene lokale und zwischengespeicherte Bilder funktionieren weiterhin."
+        if (!pickerRepo.isConfigured()) {
+            googleError = "Der Google-Fotos-Picker ist in diesem Build noch nicht konfiguriert."
+            return
+        }
+        googleFlowJob?.cancel()
+        val bridge = LocalGoogleAuthBridge(BuildConfig.PICKER_WEB_CLIENT_ID)
+        try {
+            bridge.start()
+            authBridge = bridge
+            browserAuthPending = true
+            importStatus = "Melde dich im Browser des Fernsehers an."
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(bridge.url)))
+        } catch (error: Exception) {
+            bridge.stop()
+            browserAuthPending = false
+            googleError = error.localizedMessage ?: "Der Browser für die Google-Anmeldung konnte nicht geöffnet werden."
+            return
+        }
+        googleFlowJob = lifecycleScope.launch {
+            try {
+                val token = bridge.awaitAccessToken { importStatus = "Warte auf die Google-Anmeldung im Browser …" }
+                browserAuthPending = false
+                importStatus = "Google Fotos wird verbunden …"
+                val session = pickerRepo.createSession(token)
+                pickerApiFlow = true
+                qrDoneSelected = false
+                pickerUri = session.uri
+                val downloaded = pickerRepo.waitAndDownload(token, session) { status -> importStatus = status }
+                val merged = (importedFiles + downloaded).distinct()
+                importedFiles = merged
+                getSharedPreferences("carousel", MODE_PRIVATE).edit().putStringSet("google_photos", merged.toSet()).apply()
+                importStatus = "${downloaded.size} Fotos übernommen."
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                browserAuthPending = false
+                pickerUri = null
+                googleError = error.localizedMessage ?: "Google Fotos konnte nicht verbunden werden."
+            } finally {
+                bridge.stop()
+                if (authBridge === bridge) authBridge = null
+                browserAuthPending = false
+            }
+        }
     }
 
     private fun cancelGooglePicker() {
         googleFlowJob?.cancel()
         googleFlowJob = null
+        authBridge?.stop()
+        authBridge = null
+        browserAuthPending = false
         pickerUri = null
         isImporting = false
     }
@@ -884,6 +950,28 @@ private fun InlineMessageDialog(message: String, onClose: () -> Unit) {
                         .then(if (okFocused) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(14.dp)) else Modifier),
                     colors = ButtonDefaults.buttonColors(containerColor = if (okFocused) RemoteFocusSurface else Accent, contentColor = if (okFocused) Color.White else Ink)
                 ) { Text("OK") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BrowserAuthDialog(onCancel: () -> Unit) {
+    val cancelRequester = remember { FocusRequester() }
+    var focused by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { delay(120); runCatching { cancelRequester.requestFocus() } }
+    Box(Modifier.fillMaxSize().background(Color(0xCC000000)).focusGroup(), contentAlignment = Alignment.Center) {
+        Surface(Modifier.fillMaxWidth().widthIn(max = 560.dp), color = SurfaceCard, shape = RoundedCornerShape(22.dp)) {
+            Column(Modifier.padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(Icons.Default.Cloud, contentDescription = null, tint = Accent, modifier = Modifier.size(42.dp))
+                Text("Google-Anmeldung im Browser", color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 12.dp))
+                Text("Melde dich im Browser des Fernsehers an und erlaube Photo Carousel den Zugriff auf die Fotos, die du anschließend auswählst. Nach erfolgreicher Anmeldung öffnet sich hier der Google-Fotos-Picker.", color = Color(0xFFCFD5DD), textAlign = TextAlign.Center, modifier = Modifier.padding(vertical = 16.dp))
+                Button(
+                    onClick = onCancel,
+                    modifier = Modifier.focusRequester(cancelRequester).onFocusChanged { focused = it.isFocused }
+                        .then(if (focused) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(14.dp)) else Modifier),
+                    colors = ButtonDefaults.buttonColors(containerColor = if (focused) RemoteFocusSurface else Accent, contentColor = if (focused) Color.White else Ink)
+                ) { Text("Abbrechen") }
             }
         }
     }

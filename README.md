@@ -5,7 +5,7 @@ Eine Android-App für eine dauerhaft laufende Fotoshow auf Android TV und Fire T
 ## Funktionen
 
 - **Lokale Bilder:** Mehrere Bilder aus dem Dateiauswahldialog wählen; Auswahl und Leseberechtigungen bleiben auf dem Gerät gespeichert.
-- **Google Fotos:** Der Picker-Zugriff ist vorbereitet, derzeit aber deaktiviert. Google erlaubt den benötigten Photos-Picker-Scope nicht im OAuth-Gerätecode-Flow für Fernseher. Ambient ist ebenfalls deaktiviert.
+- **Google Fotos:** Anmeldung im Silk-/Systembrowser des Fire TV, danach Fotos im Google-Photos-Picker auswählen. Die Bilder werden heruntergeladen und im privaten App-Speicher zwischengespeichert.
 - **Diashow:** Shuffle, Bilddauer von 3 bis 60 Sekunden, nächste/zurück-Steuerung, weiche Übergänge und optionaler langsamer Schwenk mit Zoom.
 - **TV-Betrieb:** Bildschirm bleibt während der Wiedergabe aktiv; Vollbilddarstellung und Steuerung über Fernbedienung.
 - **Displayausrichtung:** Beim ersten Start Quer- oder Hochformat wählen. Die gesamte Oberfläche einschließlich Einstellungen und QR-Auswahl wird gedreht; die Richtungstasten der Fernbedienung werden passend dazu umgelegt.
@@ -15,21 +15,15 @@ Eine Android-App für eine dauerhaft laufende Fotoshow auf Android TV und Fire T
 - **Ausrichtung:** Die gesamte App auf 0°, 90°, 180° oder 270° drehen. Menü, Bildanzeige und Fernbedienungsrichtungen folgen derselben Ausrichtung.
 - **Browser-Demo:** [Interaktive Vorschau](https://weisser-dev.github.io/google-photos-carousel/) mit Landscape/Portrait, Übergängen, Dauer und Bildfüllung.
 
-## Google Fotos einrichten
+## Google Fotos
 
-Die App enthält die **Google Photos Picker API**-Anbindung, startet sie aktuell jedoch nicht: Google listet den benötigten `photospicker.mediaitems.readonly`-Scope nicht für den OAuth-Gerätecode-Flow von TVs und Geräten mit eingeschränkter Eingabe ([zulässige Gerätescopes](https://developers.google.com/identity/protocols/oauth2/limited-input-device#allowed-scopes), [Picker-Scope](https://developers.google.com/photos/overview/authorization)). Ein Versuch scheitert deshalb bereits beim Anfordern des QR-/Gerätecodes. Die App zeigt stattdessen einen erklärenden Hinweis; lokale und bereits zwischengespeicherte Fotos lassen sich weiter verwenden. Eine künftige Google-Fotos-Verbindung braucht einen anderen unterstützten OAuth-Weg.
+Der TV-Gerätecode-Login kann den Photos-Picker-Scope nicht anfordern. Deshalb öffnet Photo Carousel für die Google-Anmeldung den normalen Browser auf dem Fire TV. Die App stellt dafür eine kurzlebige Anmeldeseite nur auf `127.0.0.1` bereit. Google Identity Services liefert einen kurzlebigen Zugriffstoken an diese lokale Seite; die App speichert den Token nicht dauerhaft und fordert anschließend ausschließlich `photospicker.mediaitems.readonly` an. Der Photos-Picker zeigt einen QR-Code, den du mit dem Handy scannst, um die gewünschten Fotos auszuwählen. Danach lädt die App die ausgewählten Bilder in ihren privaten Speicher.
 
-Die Ambient-Anbindung ist derzeit deaktiviert und wird von der App nicht aufgerufen. Sie kann später wieder aktiviert werden, falls Google das Projekt ins [Google Photos Partner Program](https://developers.google.com/photos/partner-program/overview) aufnimmt.
+Für den Browser-Login wird ein OAuth-Webclient mit dem JavaScript-Ursprung `http://127.0.0.1:8765` verwendet. Das Client-ID-Kennzeichen ist öffentlich und im Build enthalten; ein OAuth-Client-Secret wird weder in der App noch im Repository verwendet. Google kann bei nicht verifizierten Apps einen Warnhinweis zeigen und den Login zunächst auf eine begrenzte Zahl von Testkonten beschränken. Google muss die App verifizieren, bevor der Picker allgemein freigegeben werden kann.
 
-Für Google Fotos sind diese Schritte in Google Cloud erforderlich:
+Die **Ambient API** bleibt unabhängig davon deaktiviert. Sie benötigt eine separate Aufnahme des Cloud-Projekts ins [Google Photos Partner Program](https://developers.google.com/photos/partner-program/overview); ein OAuth-Webclient für den Picker erteilt diese Freigabe nicht.
 
-1. Der Picker benötigt `https://www.googleapis.com/auth/photospicker.mediaitems.readonly`; Google unterstützt diesen Scope derzeit nicht im OAuth-Gerätecode-Flow für TVs. Das Aktivieren der API und ein TV-OAuth-Client allein beheben diese Einschränkung nicht.
-2. Der Picker kann erst wieder angeboten werden, wenn ein anderer von Google unterstützter OAuth-Weg für Fire TV eingerichtet ist.
-3. Ambient bleibt bis zur Google-Freigabe im Partnerprogramm deaktiviert. Die aktuelle App startet für Google Fotos weder OAuth noch Ambient-Aufrufe.
-
-OAuth-Client-Secrets gehören nicht in Git oder öffentliche Workflow-Logs. Die Partnerprogramm-Freigabe für Ambient ist davon unabhängig; Ambient wird aktuell nicht verwendet.
-
-Lokal ausgewählte Bilder und bereits übernommene Picker-Dateien werden im privaten App-Speicher wiederverwendet. Eine neue Picker-Auswahl ist momentan deaktiviert.
+Picker-Bilder werden nach dem Download im privaten App-Speicher zwischengespeichert und stehen auch ohne aktive Google-Verbindung weiter zur Verfügung. Zum Aktualisieren der Auswahl muss erneut eine Picker-Sitzung gestartet werden.
 
 ## Bauen und installieren
 

@@ -18,8 +18,10 @@ android {
         applicationId = "dev.weisser.googlephotoscarousel"
         minSdk = 22
         targetSdk = 35
-        versionCode = 17
-        versionName = "0.10.7"
+        versionCode = 18
+        versionName = "0.10.8"
+        val pickerWebClientId = providers.gradleProperty("pickerWebClientId").orElse(providers.environmentVariable("PICKER_WEB_CLIENT_ID")).getOrElse("550970757162-file3452tg4735osovs3e38l4hr92obt.apps.googleusercontent.com")
+        buildConfigField("String", "PICKER_WEB_CLIENT_ID", "\"${pickerWebClientId}\"")
         val ambientClientId = providers.gradleProperty("ambientClientId").orElse(providers.environmentVariable("AMBIENT_CLIENT_ID")).getOrElse("")
         val ambientClientSecret = providers.gradleProperty("ambientClientSecret").orElse(providers.environmentVariable("AMBIENT_CLIENT_SECRET")).getOrElse("")
         buildConfigField("String", "AMBIENT_CLIENT_ID", "\"${ambientClientId}\"")
@@ -53,6 +55,10 @@ android {
     }
 
     buildTypes {
+        debug {
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+        }
         release {
             isMinifyEnabled = true
             if (releaseStoreFile != null && releaseStorePassword != null && releaseKeyAlias != null && releaseKeyPassword != null) {

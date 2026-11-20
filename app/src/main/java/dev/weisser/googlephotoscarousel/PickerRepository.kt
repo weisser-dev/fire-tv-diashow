@@ -4,7 +4,6 @@ import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
-import okhttp3.FormBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -14,42 +13,11 @@ import java.io.File
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
-/** Google Photos Picker API: OAuth device flow, remote selection, then durable local copies. */
+/** Google Photos Picker API: browser OAuth token, remote selection, then durable local copies. */
 class PickerRepository(context: Context) {
     private val app = context.applicationContext
     private val http = OkHttpClient.Builder().callTimeout(60, TimeUnit.SECONDS).build()
-    fun isConfigured() = BuildConfig.AMBIENT_CLIENT_ID.isNotBlank() && BuildConfig.AMBIENT_CLIENT_SECRET.isNotBlank()
-
-    suspend fun requestDeviceCode(): DeviceCode = withContext(Dispatchers.IO) {
-        check(isConfigured()) { "Google-OAuth ist in diesem Build nicht konfiguriert." }
-        val form = FormBody.Builder()
-            .add("client_id", BuildConfig.AMBIENT_CLIENT_ID)
-            .add("scope", "https://www.googleapis.com/auth/photospicker.mediaitems.readonly")
-            .build()
-        val json = call(Request.Builder().url("https://oauth2.googleapis.com/device/code").post(form).build(), "Google-Anmeldung")
-        DeviceCode(json.getString("device_code"), json.getString("verification_url"), json.optString("user_code"), json.optLong("interval", 5), json.optLong("expires_in", 1800))
-    }
-
-    suspend fun authorize(code: DeviceCode, onStatus: (String) -> Unit): String = withContext(Dispatchers.IO) {
-        val end = System.currentTimeMillis() + code.expiresIn * 1000
-        while (System.currentTimeMillis() < end) {
-            delay(code.interval.coerceAtLeast(5) * 1000)
-            val form = FormBody.Builder().add("client_id", BuildConfig.AMBIENT_CLIENT_ID)
-                .add("client_secret", BuildConfig.AMBIENT_CLIENT_SECRET).add("device_code", code.deviceCode)
-                .add("grant_type", "urn:ietf:params:oauth:grant-type:device_code").build()
-            val response = http.newCall(Request.Builder().url("https://oauth2.googleapis.com/token").post(form).build()).execute().use { it.code to it.body?.string().orEmpty() }
-            val json = JSONObject(response.second)
-            if (response.first in 200..299) return@withContext json.getString("access_token")
-            when (json.optString("error")) {
-                "authorization_pending" -> onStatus("Warte auf Bestätigung am Handy …")
-                "slow_down" -> delay(5000)
-                "access_denied" -> error("Google-Anmeldung wurde abgelehnt.")
-                "expired_token" -> error("Der Anmeldecode ist abgelaufen. Bitte erneut verbinden.")
-                else -> error(json.optString("error_description", "OAuth-Fehler: ${json.optString("error")}"))
-            }
-        }
-        error("Der Anmeldecode ist abgelaufen. Bitte erneut verbinden.")
-    }
+    fun isConfigured() = BuildConfig.PICKER_WEB_CLIENT_ID.isNotBlank()
 
     suspend fun createSession(token: String): PickerSession = withContext(Dispatchers.IO) {
         val requestId = UUID.randomUUID().toString()
