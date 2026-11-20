@@ -22,6 +22,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.focusable
@@ -40,6 +41,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -65,6 +67,8 @@ import java.io.File
 private val Ink = Color(0xFF10141B)
 private val SurfaceCard = Color(0xFF1B222C)
 private val Accent = Color(0xFFE8C98C)
+private val RemoteFocus = Color(0xFF42D9FF)
+private val RemoteFocusSurface = Color(0xFF153744)
 class MainActivity : ComponentActivity() {
     private val ambientRepo by lazy { AmbientRepository(this) }
     private var googleError by mutableStateOf<String?>(null)
@@ -94,6 +98,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun mapRemoteDirection(keyCode: Int, rotation: Int): Int {
+        if (rotation == 180) return when (keyCode) {
+            KeyEvent.KEYCODE_DPAD_UP -> KeyEvent.KEYCODE_DPAD_DOWN
+            KeyEvent.KEYCODE_DPAD_DOWN -> KeyEvent.KEYCODE_DPAD_UP
+            KeyEvent.KEYCODE_DPAD_LEFT -> KeyEvent.KEYCODE_DPAD_RIGHT
+            KeyEvent.KEYCODE_DPAD_RIGHT -> KeyEvent.KEYCODE_DPAD_LEFT
+            else -> keyCode
+        }
         if (rotation == 90) return when (keyCode) {
             KeyEvent.KEYCODE_DPAD_UP -> KeyEvent.KEYCODE_DPAD_LEFT
             KeyEvent.KEYCODE_DPAD_RIGHT -> KeyEvent.KEYCODE_DPAD_UP
@@ -145,8 +156,11 @@ class MainActivity : ComponentActivity() {
             var playing by remember { mutableStateOf(false) }
             var index by remember { mutableIntStateOf(0) }
             var showSettings by remember { mutableStateOf(false) }
+            var rotationBeforeSettings by remember { mutableIntStateOf(displayRotation) }
             var message by remember { mutableStateOf<String?>(null) }
             val context = LocalContext.current
+            val settingsFocusRequester = remember { FocusRequester() }
+            var settingsButtonFocused by remember { mutableStateOf(false) }
             val images = remember(localPhotos, importedFiles) { (localPhotos.map { "uri:$it" } + importedFiles.map { "file:$it" }).distinct() }
 
             MaterialTheme(colorScheme = darkColorScheme(primary = Accent, background = Ink, surface = SurfaceCard, onBackground = Color.White, onSurface = Color.White)) {
@@ -182,8 +196,19 @@ class MainActivity : ComponentActivity() {
                     onDispose { window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
                 }
                 BackHandler(playing) { playing = false }
-                BackHandler(showSettings) { showSettings = false }
+                BackHandler(showSettings) {
+                    displayRotation = rotationBeforeSettings
+                    displayDirectionForKeys = rotationBeforeSettings
+                    showSettings = false
+                }
                 BackHandler(pickerUri != null) { cancelGooglePicker() }
+                BackHandler(!orientationChosen) { }
+                LaunchedEffect(showSettings, orientationChosen) {
+                    if (!showSettings && orientationChosen) {
+                        delay(100)
+                        runCatching { settingsFocusRequester.requestFocus() }
+                    }
+                }
 
                 BoxWithConstraints(Modifier.fillMaxSize().background(Ink), contentAlignment = Alignment.Center) {
                     val swapsDimensions = displayRotation == 90 || displayRotation == 270
@@ -203,7 +228,16 @@ class MainActivity : ComponentActivity() {
                                     Text("STILLFRAME", color = Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
                                     Text("Deine Fotos. Ganz groß.", color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.SemiBold)
                                 }
-                                IconButton(onClick = { showSettings = true }) { Icon(Icons.Default.Tune, "Einstellungen", tint = Color.White) }
+                                IconButton(
+                                    modifier = Modifier
+                                        .focusRequester(settingsFocusRequester)
+                                        .onFocusChanged { settingsButtonFocused = it.isFocused }
+                                        .then(if (settingsButtonFocused) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(14.dp)) else Modifier),
+                                    onClick = {
+                                        rotationBeforeSettings = displayRotation
+                                        showSettings = true
+                                    }
+                                ) { Icon(Icons.Default.Tune, "Einstellungen", tint = Color.White) }
                             }
                             if (updateRelease != null || updateBusy || updateStatus != null) {
                                 Row(
@@ -271,10 +305,13 @@ class MainActivity : ComponentActivity() {
                     }
                     if (!orientationChosen) {
                         DisplayDirectionSetup(
-                            onSelect = { degrees ->
-                                displayRotation = degrees
-                                displayDirectionForKeys = degrees
-                                prefs.edit().putInt("display_rotation", degrees).apply()
+                            rotation = displayRotation,
+                            onRotate = {
+                                displayRotation = nextDisplayRotation(displayRotation)
+                                displayDirectionForKeys = displayRotation
+                            },
+                            onConfirm = {
+                                prefs.edit().putInt("display_rotation", displayRotation).apply()
                                 orientationChosen = true
                             }
                         )
@@ -289,12 +326,14 @@ class MainActivity : ComponentActivity() {
                             onSeconds = { seconds = it; prefs.edit().putInt("seconds", it).apply() },
                             onOrientation = { orientation = it; prefs.edit().putInt("orientation", it).apply() },
                             onPanZoom = { panZoom = it; prefs.edit().putBoolean("pan_zoom", it).apply() },
-                            onDisplayRotation = { degrees ->
-                                displayRotation = degrees
-                                displayDirectionForKeys = degrees
-                                prefs.edit().putInt("display_rotation", degrees).apply()
+                            onRotateDisplay = {
+                                displayRotation = nextDisplayRotation(displayRotation)
+                                displayDirectionForKeys = displayRotation
                             },
-                            onClose = { showSettings = false }
+                            onConfirmDisplay = {
+                                prefs.edit().putInt("display_rotation", displayRotation).apply()
+                                showSettings = false
+                            }
                         )
                     }
                     }
@@ -420,7 +459,16 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun SourceCard(title: String, subtitle: String, icon: androidx.compose.ui.graphics.vector.ImageVector, modifier: Modifier, count: Int, onClick: () -> Unit) {
-    Column(modifier.clip(RoundedCornerShape(18.dp)).background(SurfaceCard).clickable(onClick = onClick).padding(16.dp)) {
+    var focused by remember { mutableStateOf(false) }
+    Column(
+        modifier
+            .clip(RoundedCornerShape(18.dp))
+            .background(if (focused) RemoteFocusSurface else SurfaceCard)
+            .clickable(onClick = onClick)
+            .onFocusChanged { focused = it.isFocused }
+            .then(if (focused) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(18.dp)) else Modifier)
+            .padding(16.dp)
+    ) {
         Icon(icon, contentDescription = null, tint = Accent, modifier = Modifier.size(24.dp))
         Spacer(Modifier.height(12.dp))
         Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
@@ -496,28 +544,70 @@ private fun SettingsDialog(
     onSeconds: (Int) -> Unit,
     onOrientation: (Int) -> Unit,
     onPanZoom: (Boolean) -> Unit,
-    onDisplayRotation: (Int) -> Unit,
-    onClose: () -> Unit
+    onRotateDisplay: () -> Unit,
+    onConfirmDisplay: () -> Unit
 ) {
+    val rotateRequester = remember { FocusRequester() }
+    var rotateFocused by remember { mutableStateOf(false) }
+    var confirmFocused by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(120)
+        runCatching { rotateRequester.requestFocus() }
+    }
     Box(Modifier.fillMaxSize().background(Color(0xCC000000)), contentAlignment = Alignment.Center) {
         Surface(Modifier.fillMaxWidth().widthIn(max = 620.dp).heightIn(max = 700.dp), color = SurfaceCard, shape = RoundedCornerShape(24.dp)) {
             Column(Modifier.verticalScroll(rememberScrollState()).padding(24.dp)) {
                 Text("Bild & Bildschirm", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(18.dp))
                 Text("Displayrichtung", fontWeight = FontWeight.SemiBold)
-                Text("Dreht Menü, Wiedergabe und Fernbedienungssteuerung gemeinsam.", fontSize = 12.sp, color = Color.Gray)
-                Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(0, 90, 270).forEach { deg ->
-                        FilterChip(selected = displayRotation == deg, onClick = { onDisplayRotation(deg) }, label = { Text(displayDirectionName(deg)) })
+                Text("Vorschau: ${displayDirectionName(displayRotation)} · Menü und Fernbedienung drehen sofort mit.", fontSize = 12.sp, color = Color(0xFFCFD5DD))
+                Spacer(Modifier.height(10.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedButton(
+                        onClick = onRotateDisplay,
+                        modifier = Modifier.weight(1f)
+                            .focusRequester(rotateRequester)
+                            .onFocusChanged { rotateFocused = it.isFocused }
+                            .then(if (rotateFocused) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(14.dp)) else Modifier),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = if (rotateFocused) RemoteFocusSurface else Color.Transparent,
+                            contentColor = if (rotateFocused) Color.White else Accent
+                        )
+                    ) {
+                        Icon(Icons.Default.Rotate90DegreesCw, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Drehen")
                     }
+                    Button(
+                        onClick = onConfirmDisplay,
+                        modifier = Modifier.weight(1f)
+                            .onFocusChanged { confirmFocused = it.isFocused }
+                            .then(if (confirmFocused) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(14.dp)) else Modifier),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (confirmFocused) RemoteFocusSurface else Accent,
+                            contentColor = if (confirmFocused) Color.White else Ink
+                        )
+                    ) { Text("Bestätigen") }
                 }
                 Spacer(Modifier.height(16.dp))
                 Text("Bilddrehung", fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf(0, 90, 180, 270).forEach { deg ->
-                        FilterChip(selected = orientation == deg, onClick = { onOrientation(deg) }, label = { Text("${deg}°") })
+                        var focused by remember(deg) { mutableStateOf(false) }
+                        FilterChip(
+                            modifier = Modifier.onFocusChanged { focused = it.isFocused }
+                                .then(if (focused) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(12.dp)) else Modifier),
+                            selected = orientation == deg,
+                            onClick = { onOrientation(deg) },
+                            label = { Text("${deg}°") },
+                            colors = FilterChipDefaults.filterChipColors(
+                                containerColor = SurfaceCard,
+                                labelColor = Color.White,
+                                selectedContainerColor = Accent,
+                                selectedLabelColor = Ink
+                            )
+                        )
                     }
                 }
                 Text("Dreht die Fotos, ohne Originaldateien zu verändern.", fontSize = 12.sp, color = Color.Gray)
@@ -527,34 +617,72 @@ private fun SettingsDialog(
                         Text("Schwenken & Zoomen", fontWeight = FontWeight.SemiBold)
                         Text("Dezenter Schwenk: Bei 5 s Bilddauer bewegt sich das Bild nur leicht. Eine ganze Schwenkbewegung dauert mindestens 15 s.", fontSize = 12.sp, color = Color.Gray)
                     }
-                    Switch(checked = panZoom, onCheckedChange = onPanZoom)
+                    var switchFocused by remember { mutableStateOf(false) }
+                    Switch(
+                        checked = panZoom,
+                        onCheckedChange = onPanZoom,
+                        modifier = Modifier.onFocusChanged { switchFocused = it.isFocused }
+                            .then(if (switchFocused) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(24.dp)) else Modifier)
+                    )
                 }
                 Spacer(Modifier.height(14.dp))
                 Text("Bilddauer · ${seconds}s", fontWeight = FontWeight.SemiBold)
-                Slider(value = seconds.toFloat(), onValueChange = { onSeconds(it.toInt().coerceIn(3, 60)) }, valueRange = 3f..60f)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    Button(onClick = onClose) { Text("Fertig") }
-                }
+                var sliderFocused by remember { mutableStateOf(false) }
+                Slider(
+                    value = seconds.toFloat(),
+                    onValueChange = { onSeconds(it.toInt().coerceIn(3, 60)) },
+                    valueRange = 3f..60f,
+                    modifier = Modifier.onFocusChanged { sliderFocused = it.isFocused }
+                        .then(if (sliderFocused) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(12.dp)) else Modifier)
+                )
             }
         }
     }
 }
 
 @Composable
-private fun DisplayDirectionSetup(onSelect: (Int) -> Unit) {
-    val firstOption = remember { FocusRequester() }
-    LaunchedEffect(Unit) { runCatching { firstOption.requestFocus() } }
+private fun DisplayDirectionSetup(rotation: Int, onRotate: () -> Unit, onConfirm: () -> Unit) {
+    val rotateRequester = remember { FocusRequester() }
+    var rotateFocused by remember { mutableStateOf(false) }
+    var confirmFocused by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(120)
+        runCatching { rotateRequester.requestFocus() }
+    }
     Box(Modifier.fillMaxSize().background(Color(0xCC000000)), contentAlignment = Alignment.Center) {
         Surface(Modifier.fillMaxWidth().widthIn(max = 680.dp), color = SurfaceCard, shape = RoundedCornerShape(24.dp)) {
             Column(Modifier.padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("Displayausrichtung", color = Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
                 Spacer(Modifier.height(10.dp))
                 Text("Wie ist dein Fernseher montiert?", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
-                Text("Menü, Bilder und Fernbedienung werden passend ausgerichtet.", color = Color(0xFFADB7C4), fontSize = 14.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp, bottom = 20.dp))
+                Text("Drehe die Vorschau, bis sie auf deinem Fernseher richtig steht.", color = Color(0xFFCFD5DD), fontSize = 14.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp, bottom = 8.dp))
+                Text("Vorschau: ${displayDirectionName(rotation)}", color = Accent, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 16.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button(onClick = { onSelect(0) }, modifier = Modifier.weight(1f).focusRequester(firstOption)) { Text("Querformat") }
-                    Button(onClick = { onSelect(90) }, modifier = Modifier.weight(1f)) { Text("Hochformat rechts herum") }
-                    Button(onClick = { onSelect(270) }, modifier = Modifier.weight(1f)) { Text("Hochformat links herum") }
+                    OutlinedButton(
+                        onClick = onRotate,
+                        modifier = Modifier.weight(1f)
+                            .focusRequester(rotateRequester)
+                            .onFocusChanged { rotateFocused = it.isFocused }
+                            .then(if (rotateFocused) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(14.dp)) else Modifier),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = if (rotateFocused) RemoteFocusSurface else Color.Transparent,
+                            contentColor = if (rotateFocused) Color.White else Accent
+                        )
+                    ) {
+                        Icon(Icons.Default.Rotate90DegreesCw, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Drehen")
+                    }
+                    Button(
+                        onClick = onConfirm,
+                        modifier = Modifier.weight(1f)
+                            .onFocusChanged { confirmFocused = it.isFocused }
+                            .then(if (confirmFocused) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(14.dp)) else Modifier),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (confirmFocused) RemoteFocusSurface else Accent,
+                            contentColor = if (confirmFocused) Color.White else Ink
+                        )
+                    ) { Text("Bestätigen") }
                 }
             }
         }
@@ -566,6 +694,13 @@ private fun displayDirectionName(degrees: Int): String = when (degrees) {
     270 -> "Hochformat links"
     180 -> "Querformat 180°"
     else -> "Querformat"
+}
+
+private fun nextDisplayRotation(degrees: Int): Int = when (degrees) {
+    0 -> 90
+    90 -> 180
+    180 -> 270
+    else -> 0
 }
 
 @Composable
