@@ -25,6 +25,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -57,7 +61,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
-import androidx.compose.ui.window.Dialog
 
 private val Ink = Color(0xFF10141B)
 private val SurfaceCard = Color(0xFF1B222C)
@@ -78,6 +81,35 @@ class MainActivity : ComponentActivity() {
     private var downloadedUpdate by mutableStateOf<File?>(null)
     private var updateBusy by mutableStateOf(false)
     private var updateStatus by mutableStateOf<String?>(null)
+    private var displayDirectionForKeys = 0
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val mapped = mapRemoteDirection(event.keyCode, displayDirectionForKeys)
+        if (mapped == event.keyCode) return super.dispatchKeyEvent(event)
+        val remappedEvent = KeyEvent(
+            event.downTime, event.eventTime, event.action, mapped, event.repeatCount,
+            event.metaState, event.deviceId, event.scanCode, event.flags, event.source
+        )
+        return super.dispatchKeyEvent(remappedEvent)
+    }
+
+    private fun mapRemoteDirection(keyCode: Int, rotation: Int): Int {
+        if (rotation == 90) return when (keyCode) {
+            KeyEvent.KEYCODE_DPAD_UP -> KeyEvent.KEYCODE_DPAD_LEFT
+            KeyEvent.KEYCODE_DPAD_RIGHT -> KeyEvent.KEYCODE_DPAD_UP
+            KeyEvent.KEYCODE_DPAD_DOWN -> KeyEvent.KEYCODE_DPAD_RIGHT
+            KeyEvent.KEYCODE_DPAD_LEFT -> KeyEvent.KEYCODE_DPAD_DOWN
+            else -> keyCode
+        }
+        if (rotation == 270) return when (keyCode) {
+            KeyEvent.KEYCODE_DPAD_UP -> KeyEvent.KEYCODE_DPAD_RIGHT
+            KeyEvent.KEYCODE_DPAD_RIGHT -> KeyEvent.KEYCODE_DPAD_DOWN
+            KeyEvent.KEYCODE_DPAD_DOWN -> KeyEvent.KEYCODE_DPAD_LEFT
+            KeyEvent.KEYCODE_DPAD_LEFT -> KeyEvent.KEYCODE_DPAD_UP
+            else -> keyCode
+        }
+        return keyCode
+    }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         if (remoteKeyHandler?.invoke(keyCode) == true) return true
@@ -98,6 +130,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val photoPrefs = getSharedPreferences("carousel", MODE_PRIVATE)
+        displayDirectionForKeys = photoPrefs.getInt("display_rotation", 0)
         localPhotoUris = photoPrefs.getStringSet("local_photos", emptySet()).orEmpty().toList()
         importedFiles = photoPrefs.getStringSet("google_photos", emptySet()).orEmpty().toList()
         setContent {
@@ -106,6 +139,8 @@ class MainActivity : ComponentActivity() {
             var seconds by remember { mutableIntStateOf(prefs.getInt("seconds", 8)) }
             var shuffle by remember { mutableStateOf(prefs.getBoolean("shuffle", false)) }
             var orientation by remember { mutableIntStateOf(prefs.getInt("orientation", 0)) }
+            var displayRotation by remember { mutableIntStateOf(prefs.getInt("display_rotation", 0)) }
+            var orientationChosen by remember { mutableStateOf(prefs.contains("display_rotation")) }
             var panZoom by remember { mutableStateOf(prefs.getBoolean("pan_zoom", false)) }
             var playing by remember { mutableStateOf(false) }
             var index by remember { mutableIntStateOf(0) }
@@ -139,18 +174,26 @@ class MainActivity : ComponentActivity() {
                 DisposableEffect(playing) {
                     if (playing) {
                         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                        @Suppress("DEPRECATION")
-                        window.decorView.systemUiVisibility = (android.view.View.SYSTEM_UI_FLAG_FULLSCREEN or android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY)
                     } else {
                         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                        @Suppress("DEPRECATION")
-                        window.decorView.systemUiVisibility = android.view.View.SYSTEM_UI_FLAG_VISIBLE
                     }
+                    @Suppress("DEPRECATION")
+                    window.decorView.systemUiVisibility = (android.view.View.SYSTEM_UI_FLAG_FULLSCREEN or android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY)
                     onDispose { window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
                 }
                 BackHandler(playing) { playing = false }
+                BackHandler(showSettings) { showSettings = false }
+                BackHandler(pickerUri != null) { cancelGooglePicker() }
 
-                Box(Modifier.fillMaxSize().background(Ink)) {
+                BoxWithConstraints(Modifier.fillMaxSize().background(Ink), contentAlignment = Alignment.Center) {
+                    val swapsDimensions = displayRotation == 90 || displayRotation == 270
+                    Box(
+                        Modifier
+                            .width(if (swapsDimensions) maxHeight else maxWidth)
+                            .height(if (swapsDimensions) maxWidth else maxHeight)
+                            .graphicsLayer { rotationZ = displayRotation.toFloat() }
+                            .background(Ink)
+                    ) {
                     if (playing && images.isNotEmpty()) {
                         PlaybackView(images, index, orientation, panZoom, seconds, playing, onPause = { playing = false }, onNext = { index = (index + 1) % images.size }, onPrevious = { index = (index - 1 + images.size) % images.size })
                     } else {
@@ -223,15 +266,37 @@ class MainActivity : ComponentActivity() {
                                 Slider(value = seconds.toFloat(), onValueChange = { seconds = it.toInt().coerceIn(3, 60); prefs.edit().putInt("seconds", seconds).apply() }, valueRange = 3f..60f, colors = SliderDefaults.colors(thumbColor = Accent, activeTrackColor = Accent))
                             }
                             Spacer(Modifier.weight(1f))
-                            Text("Hält den Bildschirm während der Wiedergabe aktiv · Ausrichtung: ${orientation}°", color = Color(0xFF788390), fontSize = 12.sp, modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 12.dp), textAlign = TextAlign.Center)
+                            Text("Bilddrehung: ${orientation}° · Display: ${displayDirectionName(displayRotation)}", color = Color(0xFF788390), fontSize = 12.sp, modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 12.dp), textAlign = TextAlign.Center)
                         }
                     }
-                    pickerUri?.let { url ->
-                    PickerQrDialog(url, googleUserCode, importStatus, onCancel = { cancelGooglePicker() }, onDone = { pickerUri = null })
+                    if (!orientationChosen) {
+                        DisplayDirectionSetup(
+                            onSelect = { degrees ->
+                                displayRotation = degrees
+                                displayDirectionForKeys = degrees
+                                prefs.edit().putInt("display_rotation", degrees).apply()
+                                orientationChosen = true
+                            }
+                        )
                     }
-                    (googleError ?: message)?.let { text -> AlertDialog(onDismissRequest = { googleError = null; message = null }, title = { Text("Hinweis") }, text = { Text(text) }, confirmButton = { TextButton(onClick = { googleError = null; message = null }) { Text("OK") } }) }
+                    pickerUri?.let { url ->
+                        PickerQrDialog(url, googleUserCode, importStatus, onCancel = { cancelGooglePicker() }, onDone = { pickerUri = null })
+                    }
+                    (googleError ?: message)?.let { text -> InlineMessageDialog(text) { googleError = null; message = null } }
                     if (showSettings) {
-                        SettingsDialog(seconds, orientation, panZoom, onSeconds = { seconds = it; prefs.edit().putInt("seconds", it).apply() }, onOrientation = { orientation = it; prefs.edit().putInt("orientation", it).apply() }, onPanZoom = { panZoom = it; prefs.edit().putBoolean("pan_zoom", it).apply() }, onClose = { showSettings = false })
+                        SettingsDialog(
+                            seconds, orientation, panZoom, displayRotation,
+                            onSeconds = { seconds = it; prefs.edit().putInt("seconds", it).apply() },
+                            onOrientation = { orientation = it; prefs.edit().putInt("orientation", it).apply() },
+                            onPanZoom = { panZoom = it; prefs.edit().putBoolean("pan_zoom", it).apply() },
+                            onDisplayRotation = { degrees ->
+                                displayRotation = degrees
+                                displayDirectionForKeys = degrees
+                                prefs.edit().putInt("display_rotation", degrees).apply()
+                            },
+                            onClose = { showSettings = false }
+                        )
+                    }
                     }
                 }
             }
@@ -423,30 +488,97 @@ private fun PlaybackView(images: List<String>, index: Int, rotation: Int, panZoo
 }
 
 @Composable
-private fun SettingsDialog(seconds: Int, orientation: Int, panZoom: Boolean, onSeconds: (Int) -> Unit, onOrientation: (Int) -> Unit, onPanZoom: (Boolean) -> Unit, onClose: () -> Unit) {
-    AlertDialog(onDismissRequest = onClose, title = { Text("Bild & Bildschirm") }, text = {
-        Column {
-            Text("Bildrichtung", fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(0, 90, 180, 270).forEach { deg ->
-                    FilterChip(selected = orientation == deg, onClick = { onOrientation(deg) }, label = { Text("${deg}°") })
+private fun SettingsDialog(
+    seconds: Int,
+    orientation: Int,
+    panZoom: Boolean,
+    displayRotation: Int,
+    onSeconds: (Int) -> Unit,
+    onOrientation: (Int) -> Unit,
+    onPanZoom: (Boolean) -> Unit,
+    onDisplayRotation: (Int) -> Unit,
+    onClose: () -> Unit
+) {
+    Box(Modifier.fillMaxSize().background(Color(0xCC000000)), contentAlignment = Alignment.Center) {
+        Surface(Modifier.fillMaxWidth().widthIn(max = 620.dp).heightIn(max = 700.dp), color = SurfaceCard, shape = RoundedCornerShape(24.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()).padding(24.dp)) {
+                Text("Bild & Bildschirm", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(18.dp))
+                Text("Displayrichtung", fontWeight = FontWeight.SemiBold)
+                Text("Dreht Menü, Wiedergabe und Fernbedienungssteuerung gemeinsam.", fontSize = 12.sp, color = Color.Gray)
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(0, 90, 270).forEach { deg ->
+                        FilterChip(selected = displayRotation == deg, onClick = { onDisplayRotation(deg) }, label = { Text(displayDirectionName(deg)) })
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
+                Text("Bilddrehung", fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(0, 90, 180, 270).forEach { deg ->
+                        FilterChip(selected = orientation == deg, onClick = { onOrientation(deg) }, label = { Text("${deg}°") })
+                    }
+                }
+                Text("Dreht die Fotos, ohne Originaldateien zu verändern.", fontSize = 12.sp, color = Color.Gray)
+                Spacer(Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Schwenken & Zoomen", fontWeight = FontWeight.SemiBold)
+                        Text("Dezenter Schwenk: Bei 5 s Bilddauer bewegt sich das Bild nur leicht. Eine ganze Schwenkbewegung dauert mindestens 15 s.", fontSize = 12.sp, color = Color.Gray)
+                    }
+                    Switch(checked = panZoom, onCheckedChange = onPanZoom)
+                }
+                Spacer(Modifier.height(14.dp))
+                Text("Bilddauer · ${seconds}s", fontWeight = FontWeight.SemiBold)
+                Slider(value = seconds.toFloat(), onValueChange = { onSeconds(it.toInt().coerceIn(3, 60)) }, valueRange = 3f..60f)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    Button(onClick = onClose) { Text("Fertig") }
                 }
             }
-            Text("Drehung für die Anzeige; Originaldateien bleiben unverändert.", fontSize = 12.sp, color = Color.Gray)
-            Spacer(Modifier.height(12.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("Schwenken & Zoomen", fontWeight = FontWeight.SemiBold)
-                    Text("Dezenter Schwenk: Bei 5 s Bilddauer bewegt sich das Bild nur leicht. Eine ganze Schwenkbewegung dauert mindestens 15 s.", fontSize = 12.sp, color = Color.Gray)
-                }
-                Switch(checked = panZoom, onCheckedChange = onPanZoom)
-            }
-            Spacer(Modifier.height(18.dp))
-            Text("Bilddauer · ${seconds}s", fontWeight = FontWeight.SemiBold)
-            Slider(value = seconds.toFloat(), onValueChange = { onSeconds(it.toInt().coerceIn(3, 60)) }, valueRange = 3f..60f)
         }
-    }, confirmButton = { TextButton(onClick = onClose) { Text("Fertig") } })
+    }
+}
+
+@Composable
+private fun DisplayDirectionSetup(onSelect: (Int) -> Unit) {
+    val firstOption = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { firstOption.requestFocus() } }
+    Box(Modifier.fillMaxSize().background(Color(0xCC000000)), contentAlignment = Alignment.Center) {
+        Surface(Modifier.fillMaxWidth().widthIn(max = 680.dp), color = SurfaceCard, shape = RoundedCornerShape(24.dp)) {
+            Column(Modifier.padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Displayausrichtung", color = Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+                Spacer(Modifier.height(10.dp))
+                Text("Wie ist dein Fernseher montiert?", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+                Text("Menü, Bilder und Fernbedienung werden passend ausgerichtet.", color = Color(0xFFADB7C4), fontSize = 14.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp, bottom = 20.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(onClick = { onSelect(0) }, modifier = Modifier.weight(1f).focusRequester(firstOption)) { Text("Querformat") }
+                    Button(onClick = { onSelect(90) }, modifier = Modifier.weight(1f)) { Text("Hochformat rechts herum") }
+                    Button(onClick = { onSelect(270) }, modifier = Modifier.weight(1f)) { Text("Hochformat links herum") }
+                }
+            }
+        }
+    }
+}
+
+private fun displayDirectionName(degrees: Int): String = when (degrees) {
+    90 -> "Hochformat rechts"
+    270 -> "Hochformat links"
+    180 -> "Querformat 180°"
+    else -> "Querformat"
+}
+
+@Composable
+private fun InlineMessageDialog(message: String, onClose: () -> Unit) {
+    Box(Modifier.fillMaxSize().background(Color(0xCC000000)), contentAlignment = Alignment.Center) {
+        Surface(Modifier.fillMaxWidth().widthIn(max = 520.dp), color = SurfaceCard, shape = RoundedCornerShape(20.dp)) {
+            Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Hinweis", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                Text(message, color = Color(0xFFCFD5DD), modifier = Modifier.padding(vertical = 16.dp), textAlign = TextAlign.Center)
+                Button(onClick = onClose) { Text("OK") }
+            }
+        }
+    }
 }
 
 @Composable
@@ -459,14 +591,21 @@ private fun PickerQrDialog(uri: String, userCode: String, status: String, onCanc
             }.asImageBitmap()
         }.getOrNull()
     }
-    AlertDialog(onDismissRequest = onCancel, title = { Text("Mit Google Fotos verbinden") }, text = {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(if (userCode.isNotBlank()) "Scanne den Code am Handy und gib dort diesen Code ein:" else "Scanne den Code mit deinem Handy und wähle in Google Fotos das Album für diesen Fernseher.", textAlign = TextAlign.Center)
-            if (userCode.isNotBlank()) Text(userCode, color = Accent, fontWeight = FontWeight.Bold, fontSize = 22.sp, modifier = Modifier.padding(top = 8.dp))
-            Spacer(Modifier.height(14.dp))
-            if (bitmap != null) Image(bitmap, "QR-Code für Google Photos Ambient", modifier = Modifier.size(220.dp))
-            Spacer(Modifier.height(8.dp))
-            Text(status.ifBlank { "Nach der Auswahl tippe auf Fertig." }, fontSize = 12.sp, color = Color.Gray, textAlign = TextAlign.Center)
+    Box(Modifier.fillMaxSize().background(Color(0xCC000000)), contentAlignment = Alignment.Center) {
+        Surface(Modifier.fillMaxWidth().widthIn(max = 560.dp).heightIn(max = 900.dp), color = SurfaceCard, shape = RoundedCornerShape(24.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Mit Google Fotos verbinden", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                Text(if (userCode.isNotBlank()) "Scanne den Code am Handy und gib dort diesen Code ein:" else "Scanne den Code mit deinem Handy und wähle in Google Fotos das Album für diesen Fernseher.", textAlign = TextAlign.Center, color = Color(0xFFCFD5DD), modifier = Modifier.padding(top = 12.dp))
+                if (userCode.isNotBlank()) Text(userCode, color = Accent, fontWeight = FontWeight.Bold, fontSize = 22.sp, modifier = Modifier.padding(top = 8.dp))
+                Spacer(Modifier.height(14.dp))
+                if (bitmap != null) Image(bitmap, "QR-Code für Google Photos Ambient", modifier = Modifier.size(220.dp))
+                Spacer(Modifier.height(8.dp))
+                Text(status.ifBlank { "Nach der Auswahl tippe auf Fertig." }, fontSize = 12.sp, color = Color.Gray, textAlign = TextAlign.Center)
+                Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = onCancel) { Text("Abbrechen") }
+                    Button(onClick = onDone) { Text("Fertig") }
+                }
+            }
         }
-    }, confirmButton = { TextButton(onClick = onDone) { Text("Fertig") } }, dismissButton = { TextButton(onClick = onCancel) { Text("Abbrechen") } })
+    }
 }

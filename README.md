@@ -8,6 +8,8 @@ Eine Android-App für eine dauerhaft laufende Fotoshow auf Android TV und Fire T
 - **Google Fotos:** Verbindung über die Google Photos Ambient API. Der TV-Login zeigt einen QR-Code und Gerätecode; danach konfiguriert man die freigegebenen Alben in Google Fotos. Die App lädt die ausgewählten Bilder für eine stabile Wiedergabe lokal in ihren privaten Speicher.
 - **Diashow:** Shuffle, Bilddauer von 3 bis 60 Sekunden, nächste/zurück-Steuerung, weiche Übergänge und optionaler langsamer Schwenk mit Zoom.
 - **TV-Betrieb:** Bildschirm bleibt während der Wiedergabe aktiv; Vollbilddarstellung und Steuerung über Fernbedienung.
+- **Displayausrichtung:** Beim ersten Start Quer- oder Hochformat wählen. Die gesamte Oberfläche einschließlich Einstellungen und QR-Auswahl wird gedreht; die Richtungstasten der Fernbedienung werden passend dazu umgelegt.
+- **App-Symbol:** Eigenes Foto-Rahmen-Symbol im Launcher.
 - **Ältere Fire TVs:** Mindestversion Android API 22 (Fire OS 5); Releases enthalten zusätzlich die klassische APK-Signatur für ältere Android-Versionen.
 - **Updates in der App:** Beim Start wird GitHub nach einem neueren stabilen Release gefragt. Die App kann dessen APK herunterladen, Paket und Versionsnummer prüfen und den Android-Installationsdialog öffnen.
 - **Ausrichtung:** Bilder auf 0°, 90°, 180° oder 270° drehen, ohne Originaldateien zu verändern. So lassen sich auch quer ausgebende Fire-TV-Geräte an einen hochkant montierten Bildschirm anpassen.

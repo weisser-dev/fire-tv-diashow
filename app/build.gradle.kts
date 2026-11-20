@@ -18,8 +18,8 @@ android {
         applicationId = "dev.weisser.googlephotoscarousel"
         minSdk = 22
         targetSdk = 35
-        versionCode = 6
-        versionName = "0.6.0"
+        versionCode = 7
+        versionName = "0.7.0"
         val ambientClientId = providers.gradleProperty("ambientClientId").orElse(providers.environmentVariable("AMBIENT_CLIENT_ID")).getOrElse("")
         val ambientClientSecret = providers.gradleProperty("ambientClientSecret").orElse(providers.environmentVariable("AMBIENT_CLIENT_SECRET")).getOrElse("")
         buildConfigField("String", "AMBIENT_CLIENT_ID", "\"${ambientClientId}\"")
