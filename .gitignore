@@ -18,6 +18,8 @@ local.properties
 secrets.properties
 *.jks
 *.keystore
+client_secret_*.json
+oauth-client-*.json
 
 # Decompiled third-party app source tree kept locally for reference
 fotoo-2-3-10014.apk_Decompiler.com/
