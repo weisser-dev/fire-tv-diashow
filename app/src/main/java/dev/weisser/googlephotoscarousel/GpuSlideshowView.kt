@@ -260,6 +260,8 @@ internal class GpuSlideshowView @JvmOverloads constructor(
         private var motion = true
         private var movementDuration = 6000L
         private var movementStart = System.nanoTime()
+        private var motionStartProgress = 0f
+        private var motionDirection = 1f
         private var slideDurationSeconds = 6
         private var panDurationSeconds = 15
         private val vertices = floatBuffer(floatArrayOf(
@@ -287,6 +289,8 @@ internal class GpuSlideshowView @JvmOverloads constructor(
         fun setInitial(bitmap: Bitmap, mode: String, moving: Boolean, seconds: Int, panSeconds: Int, ready: () -> Unit) {
             scaleMode = mode
             motion = moving
+            slideDurationSeconds = seconds
+            panDurationSeconds = panSeconds
             movementDuration = (seconds * 1000L).coerceAtLeast(1000L)
             command {
                 deleteTexture(currentTexture)
@@ -295,6 +299,9 @@ internal class GpuSlideshowView @JvmOverloads constructor(
                 currentHeight = bitmap.height
                 currentModel = this@GpuSlideshowView.currentModel
                 movementStart = System.nanoTime()
+                motionStartProgress = 0f
+                motionDirection = 1f
+                movementDuration = durationFor(bitmap.width, bitmap.height)
                 updateAnimationMode()
                 mainHandler.post { ready() }
             }
@@ -305,8 +312,11 @@ internal class GpuSlideshowView @JvmOverloads constructor(
             motion = moving
             slideDurationSeconds = seconds
             panDurationSeconds = panSeconds
-            movementDuration = (seconds * 1000L).coerceAtLeast(1000L)
-            command { updateAnimationMode() }
+            command {
+                if (currentTexture != 0) movementDuration = durationFor(currentWidth, currentHeight)
+                movementStart = System.nanoTime()
+                updateAnimationMode()
+            }
         }
 
         fun prepare(bitmap: Bitmap, ready: () -> Unit) {
@@ -324,32 +334,31 @@ internal class GpuSlideshowView @JvmOverloads constructor(
                 if (nextTexture == 0) return@command
                 transitioningModel = model
                 beginTransition(durationMs)
+                movementDuration = durationFor(nextWidth, nextHeight)
             }
         }
 
         fun transitionTo(model: String, bitmap: Bitmap, durationMs: Int, mode: String, moving: Boolean, seconds: Int, panSeconds: Int) {
-            scaleMode = mode
-            motion = moving
-            val imageAspect = bitmap.width.toFloat() / bitmap.height
-            val viewAspect = surfaceWidth.toFloat() / surfaceHeight
-            movementDuration = (if (moving && abs(imageAspect - viewAspect) > max(imageAspect, viewAspect) * 0.015f) max(seconds, panSeconds) else seconds).coerceAtLeast(1) * 1000L
+            val nextMovementDuration = durationFor(bitmap.width, bitmap.height, moving, seconds, panSeconds)
             command {
                 deleteTexture(nextTexture)
                 nextTexture = upload(bitmap)
                 nextWidth = bitmap.width
                 nextHeight = bitmap.height
                 transitioningModel = model
+                // Capture the outgoing image's actual motion phase before adopting the
+                // incoming photo's aspect ratio or motion duration.
                 beginTransition(durationMs)
-                movementStart = System.nanoTime()
+                scaleMode = mode
+                motion = moving
+                movementDuration = nextMovementDuration
             }
         }
 
         private fun beginTransition(durationMs: Int) {
             val now = System.nanoTime()
             transitionMotionEnabled = motion && currentTexture != 0
-            transitionMotionProgress = if (transitionMotionEnabled) {
-                ((now - movementStart).toDouble() / (movementDuration * 1_000_000.0)).toFloat().coerceIn(0f, 1f)
-            } else 0f
+            transitionMotionProgress = if (transitionMotionEnabled) motionProgress(now) else 0f
             transitionDuration = durationMs.coerceAtLeast(1).toLong()
             transitionStart = now
             animate = true
@@ -403,9 +412,8 @@ internal class GpuSlideshowView @JvmOverloads constructor(
                         }
                         currentModel = transitioningModel
                         transitioningModel = null
-                        val imageAspect = currentWidth.toFloat() / currentHeight
-                        val viewAspect = surfaceWidth.toFloat() / surfaceHeight
-                        movementDuration = (if (motion && abs(imageAspect - viewAspect) > max(imageAspect, viewAspect) * 0.015f) max(slideDurationSeconds, panDurationSeconds) else slideDurationSeconds).coerceAtLeast(1) * 1000L
+                        if (transitionMotionEnabled) motionDirection *= -1f
+                        motionStartProgress = if (transitionMotionEnabled) transitionMotionProgress else 0f
                         transitionStart = 0L
                         movementStart = now
                         animate = motion && currentTexture != 0
@@ -467,13 +475,13 @@ internal class GpuSlideshowView @JvmOverloads constructor(
             val progress = if (inTransition) ((now - transitionStart).toDouble() / (transitionDuration * 1_000_000.0)).toFloat().coerceIn(0f, 1f) else 0f
             GLES20.glUniform1f(GLES20.glGetUniformLocation(shader, "uProgress"), progress)
             val outgoingMotion = if (inTransition) transitionMotionEnabled else motion
-            val outgoingProgress = if (inTransition) transitionMotionProgress else if (motion) ((now - movementStart).toDouble() / (movementDuration * 1_000_000.0)).toFloat().coerceIn(0f, 1f) else 0f
+            val outgoingProgress = if (inTransition) transitionMotionProgress else if (motion) motionProgress(now) else 0f
             val incomingMotion = inTransition && transitionMotionEnabled
             GLES20.glUniform1f(GLES20.glGetUniformLocation(shader, "uMotionA"), if (outgoingMotion) 1.0f + 0.045f * outgoingProgress else 1f)
             GLES20.glUniform1f(GLES20.glGetUniformLocation(shader, "uMotionProgressA"), outgoingProgress)
             GLES20.glUniform1f(GLES20.glGetUniformLocation(shader, "uMovingA"), if (outgoingMotion) 1f else 0f)
-            GLES20.glUniform1f(GLES20.glGetUniformLocation(shader, "uMotionB"), 1f)
-            GLES20.glUniform1f(GLES20.glGetUniformLocation(shader, "uMotionProgressB"), 0f)
+            GLES20.glUniform1f(GLES20.glGetUniformLocation(shader, "uMotionB"), if (incomingMotion) 1.0f + 0.045f * transitionMotionProgress else 1f)
+            GLES20.glUniform1f(GLES20.glGetUniformLocation(shader, "uMotionProgressB"), if (incomingMotion) transitionMotionProgress else 0f)
             GLES20.glUniform1f(GLES20.glGetUniformLocation(shader, "uMovingB"), if (incomingMotion) 1f else 0f)
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
             GLES20.glDisableVertexAttribArray(position)
@@ -499,6 +507,16 @@ internal class GpuSlideshowView @JvmOverloads constructor(
 
         private fun updateAnimationMode() {
             animate = motion && currentTexture != 0
+        }
+
+        private fun motionProgress(now: Long): Float =
+            (motionStartProgress + motionDirection * ((now - movementStart).toDouble() / (movementDuration * 1_000_000.0)).toFloat()).coerceIn(0f, 1f)
+
+        private fun durationFor(width: Int, height: Int, moving: Boolean = motion, seconds: Int = slideDurationSeconds, panSeconds: Int = panDurationSeconds): Long {
+            val imageAspect = width.toFloat() / height.coerceAtLeast(1)
+            val viewAspect = surfaceWidth.toFloat() / surfaceHeight.coerceAtLeast(1)
+            val requiresPan = abs(imageAspect - viewAspect) > max(imageAspect, viewAspect) * 0.015f
+            return (if (moving && requiresPan) max(seconds, panSeconds) else seconds).coerceAtLeast(1) * 1000L
         }
 
         private fun releaseEgl() {
