@@ -1532,12 +1532,14 @@ private fun TimeWeatherOverlay(showClock: Boolean, showDate: Boolean, showWeathe
         Row(Modifier.fillMaxWidth().padding((imagePaddingDp + 42).dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
             if (showClock) Text(time, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Medium,
                 modifier = Modifier.then(glassModifier).padding(horizontal = if (glassOverlay) 18.dp else 12.dp, vertical = if (glassOverlay) 12.dp else 8.dp))
-            Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (showDate || showWeather && weatherLabel.isNotBlank()) Column(Modifier.then(glassModifier).padding(horizontal = if (glassOverlay) 18.dp else 12.dp, vertical = if (glassOverlay) 12.dp else 8.dp), horizontalAlignment = Alignment.End) {
-                    if (showDate) Text(date, color = Color(0xFFE1E5EA), fontSize = 12.sp)
-                    if (showWeather && weatherLabel.isNotBlank()) Text(weatherLabel, color = Color(0xFFE1E5EA), fontSize = 12.sp)
+            if (showDate || showWeather && weatherLabel.isNotBlank() || uploadUrl != null) {
+                Row(Modifier.then(glassModifier).padding(horizontal = if (glassOverlay) 12.dp else 8.dp, vertical = if (glassOverlay) 6.dp else 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Column(horizontalAlignment = Alignment.End) {
+                        if (showDate) Text(date, color = Color(0xFFE1E5EA), fontSize = 12.sp)
+                        if (showWeather && weatherLabel.isNotBlank()) Text(weatherLabel, color = Color(0xFFE1E5EA), fontSize = 12.sp)
+                    }
+                    if (uploadUrl != null) PersistentQrBadge(uploadUrl, Modifier.size(42.dp), onOpenUploadQr)
                 }
-                if (uploadUrl != null) PersistentQrBadge(uploadUrl, Modifier.size(58.dp), onOpenUploadQr)
             }
         }
         if (calendarEvents.isNotEmpty() || phoneContent.hasContent) {
