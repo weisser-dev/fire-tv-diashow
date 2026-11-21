@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.os.Build
+import android.util.Log
 import android.provider.Settings
 import android.view.KeyEvent
 import android.view.WindowManager
@@ -91,22 +92,34 @@ class MainActivity : ComponentActivity() {
     private var remoteKeyHandler: ((Int) -> Boolean)? = null
     private val remoteHandledKeys = mutableSetOf<Int>()
     private var playbackControlsPulse by mutableIntStateOf(0)
+    @Volatile private var remoteDebugRotation = 0
+    @Volatile private var remoteDebugPortrait = false
+    @Volatile private var remoteDebugSelection = "starting"
     private var updateRelease by mutableStateOf<AppRelease?>(null)
     private var downloadedUpdate by mutableStateOf<File?>(null)
     private var updateBusy by mutableStateOf(false)
     private var updateStatus by mutableStateOf<String?>(null)
 
+    private fun logRemote(message: String) {
+        if (BuildConfig.DEBUG) Log.i("StillframeRemote", message)
+    }
+
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         val keyCode = event.keyCode
         if (event.action == KeyEvent.ACTION_DOWN) {
             val handled = remoteKeyHandler?.invoke(keyCode) == true
+            if (event.repeatCount == 0) logRemote("key=DOWN ${KeyEvent.keyCodeToString(keyCode)} handled=$handled rotation=$remoteDebugRotation portrait=$remoteDebugPortrait selection=$remoteDebugSelection")
             if (handled) {
                 playbackControlsPulse++
                 remoteHandledKeys += keyCode
                 return true
             }
         }
-        if (event.action == KeyEvent.ACTION_UP && remoteHandledKeys.remove(keyCode)) return true
+        if (event.action == KeyEvent.ACTION_UP) {
+            val handled = remoteHandledKeys.remove(keyCode)
+            if (event.repeatCount == 0) logRemote("key=UP ${KeyEvent.keyCodeToString(keyCode)} handled=$handled rotation=$remoteDebugRotation portrait=$remoteDebugPortrait selection=$remoteDebugSelection")
+            if (handled) return true
+        }
         return super.dispatchKeyEvent(event)
     }
 
@@ -115,6 +128,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private val photoChooser = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        logRemote("picker result count=${uris.size} schemes=${uris.mapNotNull { it.scheme }.distinct()}")
         val prefs = getSharedPreferences("carousel", MODE_PRIVATE)
         val stored = prefs.getStringSet("local_photos", emptySet()).orEmpty().toMutableSet()
         uris.forEach { uri ->
@@ -123,6 +137,18 @@ class MainActivity : ComponentActivity() {
         }
         prefs.edit().putStringSet("local_photos", stored).apply()
         localPhotoUris = stored.toList()
+    }
+
+
+    private fun launchPhotoChooser() {
+        val probe = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "image/*"
+            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+        }
+        val target = packageManager.resolveActivity(probe, 0)?.activityInfo
+        logRemote("picker intent=OPEN_DOCUMENT target=${target?.packageName}/${target?.name ?: "none"} rotation=$remoteDebugRotation")
+        photoChooser.launch(arrayOf("image/*"))
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -207,6 +233,24 @@ class MainActivity : ComponentActivity() {
                 else (localPhotos.map { "uri:$it" } + selectedUploads.map { "file:${it.path}" }).distinct()
             }
             val portraitUi = displayRotation == 90 || displayRotation == 270
+            val remoteSelection = when {
+                showSettings -> "settings:$focusedSettingsNode"
+                message != null -> "dialog:message"
+                uploadUrl != null -> "dialog:upload"
+                !orientationChosen -> "setup:rotation"
+                playing && paused -> "pause-menu:$pauseMenuIndex"
+                playing -> "slideshow:$index/${images.size}"
+                mainFocusNode == 5 -> "photos:$photoManagerTarget:$focusedPhotoIndex/${images.size}"
+                else -> when (mainFocusNode) { 0 -> "settings-button"; 1 -> "files-source"; 2 -> "phone-upload"; 3 -> "album-filter:$focusedAlbumIndex"; 4 -> "sort-order"; 6 -> "play"; 7 -> "update"; else -> "main:$mainFocusNode" }
+            }
+            SideEffect {
+                remoteDebugRotation = displayRotation
+                remoteDebugPortrait = portraitUi
+                remoteDebugSelection = remoteSelection
+            }
+            LaunchedEffect(remoteSelection, displayRotation, portraitUi) {
+                logRemote("selected=$remoteSelection rotation=$displayRotation portrait=$portraitUi")
+            }
             LaunchedEffect(images.size) {
                 focusedPhotoIndex = focusedPhotoIndex.coerceIn(0, (images.size - 1).coerceAtLeast(0))
                 if (images.isEmpty()) photoManagerTarget = "clear"
@@ -493,7 +537,7 @@ class MainActivity : ComponentActivity() {
                                     }
                                     when (mainFocusNode) {
                                         0 -> { rotationBeforeSettings = displayRotation; focusedSettingsNode = 0; showSettings = true }
-                                        1 -> photoChooser.launch(arrayOf("image/*"))
+                                        1 -> launchPhotoChooser()
                                         2 -> startPhotoUpload()
                                         3 -> {
                                             selectedUploadAlbum = if (focusedAlbumIndex == 0) "*" else uploadAlbums.getOrNull(focusedAlbumIndex - 1) ?: "*"
@@ -529,7 +573,7 @@ class MainActivity : ComponentActivity() {
                                     when (pauseMenuIndex) {
                                         0 -> paused = false
                                         1 -> startPhotoUpload()
-                                        2 -> photoChooser.launch(arrayOf("image/*"))
+                                        2 -> launchPhotoChooser()
                                         3 -> seconds = if (seconds >= 60) 3 else seconds + 1
                                         4 -> transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut", "slide", "zoom"), 1)
                                         5 -> imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch"), 1)
@@ -644,7 +688,7 @@ class MainActivity : ComponentActivity() {
                             showClock, showDate, weatherEnabled, weatherLabel, glassOverlay,
                             onPause = { paused = true; pauseMenuIndex = 0 },
                             onNext = { index = (index + 1) % images.size }, onPrevious = { index = (index - 1 + images.size) % images.size },
-                            onResume = { paused = false }, onAddImages = { startPhotoUpload() }, onAddFiles = { photoChooser.launch(arrayOf("image/*")) },
+                            onResume = { paused = false }, onAddImages = { startPhotoUpload() }, onAddFiles = { launchPhotoChooser() },
                             onCycleSpeed = { direction -> seconds = (seconds + direction).coerceIn(3, 60); prefs.edit().putInt("seconds", seconds).apply() },
                             onCycleTransition = { direction -> transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut", "slide", "zoom"), direction); prefs.edit().putString("transition_style", transitionStyle).apply() },
                             onCycleScale = { direction -> imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch"), direction); prefs.edit().putString("image_scale_mode", imageScaleMode).apply() },
@@ -696,12 +740,12 @@ class MainActivity : ComponentActivity() {
                             Spacer(Modifier.height(10.dp))
                             if (portraitUi) {
                                 Column(Modifier.fillMaxWidth().focusGroup(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    SourceCard("Dateien", "Fotos von diesem Gerät", Icons.Default.FolderOpen, Modifier.fillMaxWidth().focusRequester(localSourceFocusRequester), count = localPhotos.size, onClick = { photoChooser.launch(arrayOf("image/*")) }, onFocusChange = { if (it) { sourceCardFocus = 0; mainFocusNode = 1; focusRestoreNode = 1 } else if (sourceCardFocus == 0) sourceCardFocus = -1 })
+                                    SourceCard("Dateien", "Fotos von diesem Gerät", Icons.Default.FolderOpen, Modifier.fillMaxWidth().focusRequester(localSourceFocusRequester), count = localPhotos.size, onClick = { launchPhotoChooser() }, onFocusChange = { if (it) { sourceCardFocus = 0; mainFocusNode = 1; focusRestoreNode = 1 } else if (sourceCardFocus == 0) sourceCardFocus = -1 })
                                     SourceCard("Handy-Upload", "Bilder per QR im WLAN", Icons.Default.QrCode2, Modifier.fillMaxWidth().focusRequester(uploadSourceFocusRequester), count = uploadedPhotos.size, onClick = { startPhotoUpload() }, onFocusChange = { if (it) { sourceCardFocus = 1; mainFocusNode = 2; focusRestoreNode = 2 } else if (sourceCardFocus == 1) sourceCardFocus = -1 })
                                 }
                             } else {
                                 Row(Modifier.fillMaxWidth().focusGroup(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    SourceCard("Dateien", "Fotos von diesem Gerät", Icons.Default.FolderOpen, Modifier.weight(1f).focusRequester(localSourceFocusRequester), count = localPhotos.size, onClick = { photoChooser.launch(arrayOf("image/*")) }, onFocusChange = { if (it) { sourceCardFocus = 0; mainFocusNode = 1; focusRestoreNode = 1 } else if (sourceCardFocus == 0) sourceCardFocus = -1 })
+                                    SourceCard("Dateien", "Fotos von diesem Gerät", Icons.Default.FolderOpen, Modifier.weight(1f).focusRequester(localSourceFocusRequester), count = localPhotos.size, onClick = { launchPhotoChooser() }, onFocusChange = { if (it) { sourceCardFocus = 0; mainFocusNode = 1; focusRestoreNode = 1 } else if (sourceCardFocus == 0) sourceCardFocus = -1 })
                                     SourceCard("Handy-Upload", "Bilder per QR im WLAN", Icons.Default.QrCode2, Modifier.weight(1f).focusRequester(uploadSourceFocusRequester), count = uploadedPhotos.size, onClick = { startPhotoUpload() }, onFocusChange = { if (it) { sourceCardFocus = 1; mainFocusNode = 2; focusRestoreNode = 2 } else if (sourceCardFocus == 1) sourceCardFocus = -1 })
                                 }
                             }
