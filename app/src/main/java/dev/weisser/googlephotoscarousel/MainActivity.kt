@@ -236,6 +236,12 @@ class MainActivity : ComponentActivity() {
             var weatherCountry by remember { mutableStateOf(prefs.getString("weather_country", "DE") ?: "DE") }
             var weatherPostal by remember { mutableStateOf(prefs.getString("weather_postal", "") ?: "") }
             var weatherLabel by remember { mutableStateOf("") }
+            var calendarEnabled by remember { mutableStateOf(prefs.getBoolean("calendar_enabled", false)) }
+            var calendarFeedUrl by remember { mutableStateOf(prefs.getString("calendar_feed_url", "").orEmpty()) }
+            var calendarEvents by remember { mutableStateOf<List<CalendarEvent>>(emptyList()) }
+            var calendarStatus by remember { mutableStateOf("") }
+            var notesEnabled by remember { mutableStateOf(prefs.getBoolean("notes_enabled", false)) }
+            var noteText by remember { mutableStateOf(prefs.getString("note_text", "").orEmpty()) }
             var scheduleEnabled by remember { mutableStateOf(prefs.getBoolean("schedule_enabled", false)) }
             var scheduleWeekdaysOnly by remember { mutableStateOf(prefs.getBoolean("schedule_weekdays_only", true)) }
             var scheduleStart by remember { mutableStateOf(prefs.getString("schedule_start", "16:00") ?: "16:00") }
@@ -325,6 +331,26 @@ class MainActivity : ComponentActivity() {
                     delay(750)
                     weatherLabel = withContext(Dispatchers.IO) { fetchWeather(weatherCountry, weatherPostal.trim()) }.orEmpty()
                         logRemote(if (weatherLabel.isBlank()) "weather unavailable country=$weatherCountry postal=${weatherPostal.trim()}" else "weather loaded $weatherLabel")
+                }
+            }
+            LaunchedEffect(calendarEnabled, calendarFeedUrl) {
+                if (!calendarEnabled || calendarFeedUrl.isBlank()) {
+                    calendarEvents = emptyList()
+                    calendarStatus = ""
+                } else {
+                    delay(1_500)
+                    while (true) {
+                        val result = runCatching { withContext(Dispatchers.IO) { fetchCalendarEvents(calendarFeedUrl) } }
+                        result.onSuccess {
+                            calendarEvents = it
+                            calendarStatus = "${it.size} Termine geladen"
+                            logRemote("calendar loaded events=${it.size} birthdays=${it.count { event -> event.kind == CalendarEventKind.BIRTHDAY }} garbage=${it.count { event -> event.kind == CalendarEventKind.GARBAGE }}")
+                        }.onFailure {
+                            calendarStatus = "Kalender-Feed konnte nicht geladen werden. Adresse und Internetverbindung prüfen."
+                            logRemote("calendar fetch failed type=${it.javaClass.simpleName}")
+                        }
+                        delay(15 * 60 * 1000L)
+                    }
                 }
             }
             LaunchedEffect(scheduleEnabled, scheduleWeekdaysOnly, scheduleStart, scheduleEnd, images.size, showSettings) {
@@ -470,7 +496,7 @@ class MainActivity : ComponentActivity() {
                         showSettings -> settingsKeys@{ code ->
                             when (code) {
                                 KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                                    if (focusedSettingsNode in listOf(9, 10, 15, 16)) return@settingsKeys false
+                                    if (focusedSettingsNode in listOf(9, 10, 15, 16, 19, 21)) return@settingsKeys false
                                     if (focusedSettingsNode == 2) { imagePaddingDp = cycleValue(imagePaddingDp, listOf(0, 4, 8, 12, 16, 24, 32), 1); prefs.edit().putInt("image_padding_dp", imagePaddingDp).apply(); return@settingsKeys true }
                                     when (focusedSettingsNode) {
                                         0 -> focusedSettingsNode = 1
@@ -479,13 +505,15 @@ class MainActivity : ComponentActivity() {
                                         11 -> transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut", "slide", "zoom"), 1)
                                         12 -> imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch", "ken_burns"), 1)
                                         17 -> { glassOverlay = !glassOverlay; prefs.edit().putBoolean("glass_overlay", glassOverlay).apply() }
+                                        18 -> { calendarEnabled = !calendarEnabled; prefs.edit().putBoolean("calendar_enabled", calendarEnabled).apply() }
+                                        20 -> { notesEnabled = !notesEnabled; prefs.edit().putBoolean("notes_enabled", notesEnabled).apply() }
                                     }
                                     if (focusedSettingsNode == 4) prefs.edit().putInt("seconds", seconds).apply()
                                     if (focusedSettingsNode == 5) prefs.edit().putBoolean("auto_start_on_boot", autoStartOnBoot).apply()
                                     true
                                 }
                                 KeyEvent.KEYCODE_DPAD_LEFT -> {
-                                    if (focusedSettingsNode in listOf(9, 10, 15, 16)) return@settingsKeys false
+                                    if (focusedSettingsNode in listOf(9, 10, 15, 16, 19, 21)) return@settingsKeys false
                                     if (focusedSettingsNode == 2) { imagePaddingDp = cycleValue(imagePaddingDp, listOf(0, 4, 8, 12, 16, 24, 32), -1); prefs.edit().putInt("image_padding_dp", imagePaddingDp).apply(); return@settingsKeys true }
                                     when (focusedSettingsNode) {
                                         1 -> focusedSettingsNode = 0
@@ -494,15 +522,17 @@ class MainActivity : ComponentActivity() {
                                         11 -> transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut", "slide", "zoom"), -1)
                                         12 -> imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch", "ken_burns"), -1)
                                         17 -> { glassOverlay = !glassOverlay; prefs.edit().putBoolean("glass_overlay", glassOverlay).apply() }
+                                        18 -> { calendarEnabled = !calendarEnabled; prefs.edit().putBoolean("calendar_enabled", calendarEnabled).apply() }
+                                        20 -> { notesEnabled = !notesEnabled; prefs.edit().putBoolean("notes_enabled", notesEnabled).apply() }
                                     }
                                     if (focusedSettingsNode == 4) prefs.edit().putInt("seconds", seconds).apply()
                                     if (focusedSettingsNode == 5) prefs.edit().putBoolean("auto_start_on_boot", autoStartOnBoot).apply()
                                     true
                                 }
                                 KeyEvent.KEYCODE_DPAD_DOWN -> {
-                                    focusedSettingsNode = if (portraitUi) (focusedSettingsNode + 1).coerceAtMost(17) else when (focusedSettingsNode) {
+                                    focusedSettingsNode = if (portraitUi) (focusedSettingsNode + 1).coerceAtMost(21) else when (focusedSettingsNode) {
                                         0, 1 -> 2
-                                        else -> (focusedSettingsNode + 1).coerceAtMost(17)
+                                        else -> (focusedSettingsNode + 1).coerceAtMost(21)
                                     }
                                     true
                                 }
@@ -511,7 +541,7 @@ class MainActivity : ComponentActivity() {
                                     true
                                 }
                                 KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_SPACE -> {
-                                    if (focusedSettingsNode in listOf(9, 10, 15, 16)) return@settingsKeys false
+                                    if (focusedSettingsNode in listOf(9, 10, 15, 16, 19, 21)) return@settingsKeys false
                                     when (focusedSettingsNode) {
                                         0 -> displayRotation = nextDisplayRotation(displayRotation)
                                         1 -> { prefs.edit().putInt("display_rotation", displayRotation).apply(); showSettings = false }
@@ -527,6 +557,8 @@ class MainActivity : ComponentActivity() {
                                         13 -> { scheduleEnabled = !scheduleEnabled; prefs.edit().putBoolean("schedule_enabled", scheduleEnabled).apply() }
                                         14 -> { scheduleWeekdaysOnly = !scheduleWeekdaysOnly; prefs.edit().putBoolean("schedule_weekdays_only", scheduleWeekdaysOnly).apply() }
                                         17 -> { glassOverlay = !glassOverlay; prefs.edit().putBoolean("glass_overlay", glassOverlay).apply() }
+                                        18 -> { calendarEnabled = !calendarEnabled; prefs.edit().putBoolean("calendar_enabled", calendarEnabled).apply() }
+                                        20 -> { notesEnabled = !notesEnabled; prefs.edit().putBoolean("notes_enabled", notesEnabled).apply() }
                                     }
                                     prefs.edit().putString("transition_style", transitionStyle).putString("image_scale_mode", imageScaleMode).apply()
                                     true
@@ -742,10 +774,10 @@ class MainActivity : ComponentActivity() {
                     ) {
                             val modalVisible = showSettings || showPhotoManager || message != null || !orientationChosen || uploadUrl != null || showPinSetup
                     if (sleeping) {
-                        SleepScreen(showClock, showDate, weatherEnabled, weatherLabel, glassOverlay)
+                        SleepScreen(showClock, showDate, weatherEnabled, weatherLabel, glassOverlay, if (calendarEnabled) calendarEvents else emptyList(), if (notesEnabled) noteText else "")
                     } else if (playing && images.isNotEmpty()) {
                         PlaybackView(images, index, nextSlideIndex, panZoom, seconds, motionSeconds, playing, paused, imageScaleMode, imagePaddingDp, playbackControlsPulse, transitionStyle, pauseMenuIndex, shuffle, sleepTimerMinutes,
-                            showClock, showDate, weatherEnabled, weatherLabel, glassOverlay,
+                            showClock, showDate, weatherEnabled, weatherLabel, glassOverlay, if (calendarEnabled) calendarEvents else emptyList(), if (notesEnabled) noteText else "",
                             onNextPreloaded = { loadedNextPhoto = it },
                             onNextPreloadFailed = { failedPreloadPhotos = failedPreloadPhotos + it },
                             onImageMotionRequired = { currentImageNeedsMotion = it },
@@ -932,12 +964,16 @@ class MainActivity : ComponentActivity() {
                         SettingsDialog(
                             seconds, panZoom, displayRotation, focusedSettingsNode, portraitUi, autoStartOnBoot,
                             showClock, showDate, weatherEnabled, weatherCountry, weatherPostal, transitionStyle, imageScaleMode, glassOverlay, imagePaddingDp,
-                            scheduleEnabled, scheduleWeekdaysOnly, scheduleStart, scheduleEnd,
+                            scheduleEnabled, scheduleWeekdaysOnly, scheduleStart, scheduleEnd, calendarEnabled, calendarFeedUrl, calendarStatus, notesEnabled, noteText,
                             onFocusedNode = { focusedSettingsNode = it },
                             onAutoStartOnBoot = { autoStartOnBoot = it; prefs.edit().putBoolean("auto_start_on_boot", it).apply() },
                             onShowClock = { showClock = it; prefs.edit().putBoolean("show_clock", it).apply() },
                             onShowDate = { showDate = it; prefs.edit().putBoolean("show_date", it).apply() },
                             onShowWeather = { weatherEnabled = it; prefs.edit().putBoolean("show_weather", it).apply() },
+                            onCalendarEnabled = { calendarEnabled = it; prefs.edit().putBoolean("calendar_enabled", it).apply() },
+                            onCalendarFeedUrl = { calendarFeedUrl = it; prefs.edit().putString("calendar_feed_url", it).apply() },
+                            onNotesEnabled = { notesEnabled = it; prefs.edit().putBoolean("notes_enabled", it).apply() },
+                            onNoteText = { noteText = it.take(240); prefs.edit().putString("note_text", noteText).apply() },
                             onGlassOverlay = { glassOverlay = it; prefs.edit().putBoolean("glass_overlay", it).apply() },
                             onWeatherCountry = { weatherCountry = it.uppercase().take(2); prefs.edit().putString("weather_country", weatherCountry).apply() },
                             onWeatherPostal = { weatherPostal = it; prefs.edit().putString("weather_postal", it).apply() },
@@ -1195,7 +1231,7 @@ private fun EmptyState() {
 private fun PlaybackView(
     images: List<String>, index: Int, nextIndex: Int, panZoom: Boolean, seconds: Int, motionSeconds: Int, playing: Boolean,
     paused: Boolean, imageScaleMode: String, imagePaddingDp: Int, controlsPulse: Int, transitionStyle: String, pauseMenuIndex: Int, shuffle: Boolean, sleepTimerMinutes: Int,
-    showClock: Boolean, showDate: Boolean, showWeather: Boolean, weatherLabel: String, glassOverlay: Boolean,
+    showClock: Boolean, showDate: Boolean, showWeather: Boolean, weatherLabel: String, glassOverlay: Boolean, calendarEvents: List<CalendarEvent>, noteText: String,
     onNextPreloaded: (String) -> Unit, onNextPreloadFailed: (String) -> Unit,
     onImageMotionRequired: (Boolean) -> Unit,
     onPause: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onResume: () -> Unit,
@@ -1356,8 +1392,8 @@ private fun PlaybackView(
                 )
             }
         }
-        if (showClock || showDate || showWeather && weatherLabel.isNotBlank()) {
-            TimeWeatherOverlay(showClock, showDate, showWeather, weatherLabel, glassOverlay, imagePaddingDp)
+        if (showClock || showDate || showWeather && weatherLabel.isNotBlank() || calendarEvents.isNotEmpty() || noteText.isNotBlank()) {
+            TimeWeatherOverlay(showClock, showDate, showWeather, weatherLabel, glassOverlay, imagePaddingDp, calendarEvents, noteText)
         }
         if (paused) {
             Box(Modifier.fillMaxSize().background(Color(0x66000000)), contentAlignment = Alignment.Center) {
@@ -1424,7 +1460,7 @@ private fun PlaybackView(
 }
 
 @Composable
-private fun TimeWeatherOverlay(showClock: Boolean, showDate: Boolean, showWeather: Boolean, weatherLabel: String, glassOverlay: Boolean, imagePaddingDp: Int) {
+private fun TimeWeatherOverlay(showClock: Boolean, showDate: Boolean, showWeather: Boolean, weatherLabel: String, glassOverlay: Boolean, imagePaddingDp: Int, calendarEvents: List<CalendarEvent>, noteText: String) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { delay(15_000); now = System.currentTimeMillis() } }
     val date = remember(now) { java.text.SimpleDateFormat("EEEE, d. MMMM", java.util.Locale.getDefault()).format(java.util.Date(now)) }
@@ -1445,11 +1481,13 @@ private fun TimeWeatherOverlay(showClock: Boolean, showDate: Boolean, showWeathe
                 if (showWeather && weatherLabel.isNotBlank()) Text(weatherLabel, color = Color(0xFFE1E5EA), fontSize = 12.sp)
             }
         }
+        if (calendarEvents.isNotEmpty()) CalendarAgenda(calendarEvents, glassOverlay, Modifier.align(Alignment.BottomEnd).padding((imagePaddingDp + 20).dp))
+        if (noteText.isNotBlank()) NoteCard(noteText, glassOverlay, Modifier.align(Alignment.BottomStart).padding((imagePaddingDp + 20).dp))
     }
 }
 
 @Composable
-private fun SleepScreen(showClock: Boolean, showDate: Boolean, showWeather: Boolean, weatherLabel: String, glassOverlay: Boolean) {
+private fun SleepScreen(showClock: Boolean, showDate: Boolean, showWeather: Boolean, weatherLabel: String, glassOverlay: Boolean, calendarEvents: List<CalendarEvent>, noteText: String) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { delay(15_000); now = System.currentTimeMillis() } }
     val date = remember(now) { java.text.SimpleDateFormat("EEEE, d. MMMM", java.util.Locale.getDefault()).format(java.util.Date(now)) }
@@ -1465,6 +1503,50 @@ private fun SleepScreen(showClock: Boolean, showDate: Boolean, showWeather: Bool
                         Icon(Icons.Default.Cloud, contentDescription = "Wetter", tint = Color(0xFF555B63), modifier = Modifier.size(19.dp).padding(end = 3.dp))
                         Text(weatherLabel, color = Color(0xFF555B63), fontSize = 19.sp)
                     }
+                }
+            }
+        }
+        if (calendarEvents.isNotEmpty()) CalendarAgenda(calendarEvents, glassOverlay, Modifier.align(Alignment.BottomCenter).padding(18.dp))
+        if (noteText.isNotBlank()) NoteCard(noteText, false, Modifier.align(Alignment.BottomStart).padding(18.dp))
+    }
+}
+
+@Composable
+private fun NoteCard(text: String, glass: Boolean, modifier: Modifier = Modifier) {
+    val shape = RoundedCornerShape(16.dp)
+    val background = if (glass) Modifier.clip(shape).background(Brush.linearGradient(listOf(Color(0x55FFFFFF), Color(0x443D536A), Color(0xAA141B25)))).border(1.dp, Color(0x66FFFFFF), shape)
+        else Modifier.clip(shape).background(Color(0xAA0E1116))
+    Text(text, color = if (glass) Color.White else Color(0xFFB4BAC2), fontSize = 15.sp, maxLines = 4, modifier = modifier.widthIn(max = 320.dp).then(background).padding(horizontal = 14.dp, vertical = 10.dp))
+}
+
+@Composable
+private fun CalendarAgenda(events: List<CalendarEvent>, glass: Boolean, modifier: Modifier = Modifier) {
+    val zone = java.util.TimeZone.getDefault()
+    val todayDate = java.util.Date()
+    val today = dayKey(todayDate, zone)
+    val weekEnd = dayKey(addDays(dayStart(todayDate, zone), 7, zone), zone)
+    val grouped = listOf(
+        "Heute" to events.filter { dayKey(it.startsAt, zone) == today },
+        "Diese Woche" to events.filter { val day = dayKey(it.startsAt, zone); day > today && day <= weekEnd },
+        "Bald" to events.filter { dayKey(it.startsAt, zone) > weekEnd }
+    ).filter { it.second.isNotEmpty() }
+    if (grouped.isEmpty()) return
+    val shape = RoundedCornerShape(16.dp)
+    val background = if (glass) Modifier.clip(shape).background(Brush.linearGradient(listOf(Color(0x55FFFFFF), Color(0x443D536A), Color(0xAA141B25)))).border(1.dp, Color(0x66FFFFFF), shape)
+        else Modifier.clip(shape).background(Color(0xAA0E1116))
+    Column(modifier.widthIn(max = 320.dp).then(background).padding(horizontal = 14.dp, vertical = 10.dp)) {
+        grouped.forEach { (label, items) ->
+            Text(label, color = Color(0xFFE8C98C), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            items.take(2).forEach { event ->
+                Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    val (icon, tint, description) = when (event.kind) {
+                        CalendarEventKind.BIRTHDAY -> Triple(Icons.Default.Cake, Color(0xFFFFD27A), "Geburtstag")
+                        CalendarEventKind.GARBAGE -> Triple(Icons.Default.DeleteOutline, Color(0xFFB9D4E8), "Müllabfuhr")
+                        else -> Triple(Icons.Default.Event, Color(0xFFE0E5EB), "Termin")
+                    }
+                    Icon(icon, contentDescription = description, tint = tint, modifier = Modifier.size(16.dp))
+                    val time = if (event.allDay) "Ganztägig" else java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(event.startsAt)
+                    Text("$time · ${event.title}", color = Color.White, fontSize = 12.sp, maxLines = 1, modifier = Modifier.padding(start = 6.dp))
                 }
             }
         }
@@ -1550,11 +1632,20 @@ private fun SettingsDialog(
     scheduleWeekdaysOnly: Boolean,
     scheduleStart: String,
     scheduleEnd: String,
+    calendarEnabled: Boolean,
+    calendarFeedUrl: String,
+    calendarStatus: String,
+    notesEnabled: Boolean,
+    noteText: String,
     onFocusedNode: (Int) -> Unit,
     onAutoStartOnBoot: (Boolean) -> Unit,
     onShowClock: (Boolean) -> Unit,
     onShowDate: (Boolean) -> Unit,
     onShowWeather: (Boolean) -> Unit,
+    onCalendarEnabled: (Boolean) -> Unit,
+    onCalendarFeedUrl: (String) -> Unit,
+    onNotesEnabled: (Boolean) -> Unit,
+    onNoteText: (String) -> Unit,
     onGlassOverlay: (Boolean) -> Unit,
     onWeatherCountry: (String) -> Unit,
     onWeatherPostal: (String) -> Unit,
@@ -1575,8 +1666,10 @@ private fun SettingsDialog(
     val scheduleEndFocus = remember { FocusRequester() }
     val countryFocus = remember { FocusRequester() }
     val postalFocus = remember { FocusRequester() }
+    val calendarUrlFocus = remember { FocusRequester() }
+    val noteFocus = remember { FocusRequester() }
     LaunchedEffect(focusedSettingsNode) {
-        val position = (settingsScroll.maxValue * (focusedSettingsNode.coerceIn(0, 17) / 17f)).toInt()
+        val position = (settingsScroll.maxValue * (focusedSettingsNode.coerceIn(0, 21) / 21f)).toInt()
         runCatching { settingsScroll.animateScrollTo(position) }
         delay(50)
         runCatching {
@@ -1585,6 +1678,8 @@ private fun SettingsDialog(
                 10 -> postalFocus.requestFocus()
                 15 -> scheduleStartFocus.requestFocus()
                 16 -> scheduleEndFocus.requestFocus()
+                19 -> calendarUrlFocus.requestFocus()
+                21 -> noteFocus.requestFocus()
             }
         }
     }
@@ -1710,6 +1805,22 @@ private fun SettingsDialog(
                 Text("Aktive Zeit", color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 10.dp))
                 Text("${if (scheduleWeekdaysOnly) "Mo–Fr" else "Jeden Tag"} ${scheduleStart.ifBlank { "16:00" }}–${scheduleEnd.ifBlank { "21:00" }} · außerhalb zeigt die App den Schlafbildschirm.", color = Color(0xFFB8C1CC), fontSize = 12.sp)
                 SettingsToggle("Liquid-Glass-Optik", "Leichtes Glas mit transparentem Verlauf und Lichtkante für Uhr, Datum und Wetter.", glassOverlay, 17, focusedSettingsNode, onGlassOverlay)
+                Spacer(Modifier.height(10.dp))
+                SettingsToggle("Kalender anzeigen", "Anstehende Termine mit Glass-Karte, heute, diese Woche und bald.", calendarEnabled, 18, focusedSettingsNode, onCalendarEnabled)
+                Text("iCloud- oder iCal-Adresse", color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                Text("Private Kalenderadresse bleibt nur auf diesem Gerät gespeichert. webcal:// wird sicher über HTTPS geladen.", color = Color(0xFFB8C1CC), fontSize = 12.sp)
+                OutlinedTextField(
+                    value = calendarFeedUrl,
+                    onValueChange = onCalendarFeedUrl,
+                    label = { Text("webcal://… oder https://…") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().focusRequester(calendarUrlFocus).onFocusChanged { if (it.isFocused) onFocusedNode(19) }
+                        .then(if (focusedSettingsNode == 19) Modifier.border(3.dp, RemoteFocus, RoundedCornerShape(12.dp)) else Modifier)
+                )
+                if (calendarStatus.isNotBlank()) Text(calendarStatus, color = if (calendarStatus.contains("geladen")) Color(0xFF9FE3B1) else Color(0xFFFFB4A9), fontSize = 12.sp)
+                Spacer(Modifier.height(12.dp))
+                SettingsToggle("Notiz anzeigen", "Eine kurze persönliche Notiz über Fotos legen, auch im Schlafbildschirm.", notesEnabled, 20, focusedSettingsNode, onNotesEnabled)
+                OutlinedTextField(value = noteText, onValueChange = onNoteText, label = { Text("Notiz · bis 240 Zeichen") }, minLines = 2, maxLines = 4, modifier = Modifier.fillMaxWidth().focusRequester(noteFocus).onFocusChanged { if (it.isFocused) onFocusedNode(21) }.then(if (focusedSettingsNode == 21) Modifier.border(3.dp, RemoteFocus, RoundedCornerShape(12.dp)) else Modifier))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedTextField(value = scheduleStart, onValueChange = { value -> if (value.length <= 5 && value.all { it.isDigit() || it == ':' }) onScheduleStart(value) }, label = { Text("Von · HH:MM") }, singleLine = true,
                         modifier = Modifier.weight(1f).focusRequester(scheduleStartFocus).onFocusChanged { if (it.isFocused) onFocusedNode(15) }.then(if (focusedSettingsNode == 15) Modifier.border(3.dp, RemoteFocus, RoundedCornerShape(12.dp)) else Modifier))
