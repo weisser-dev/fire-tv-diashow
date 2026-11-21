@@ -178,7 +178,6 @@ class MainActivity : ComponentActivity() {
             val localPhotos = localPhotoUris
             var seconds by remember { mutableIntStateOf(prefs.getInt("seconds", 8)) }
             var motionSeconds by remember { mutableIntStateOf(prefs.getInt("motion_seconds", 30)) }
-            var currentImageLandscape by remember { mutableStateOf(false) }
             var shuffle by remember { mutableStateOf(prefs.getBoolean("shuffle", false)) }
             var displayRotation by remember { mutableIntStateOf(prefs.getInt("display_rotation", 0)) }
             var orientationChosen by remember { mutableStateOf(prefs.contains("display_rotation")) }
@@ -186,6 +185,7 @@ class MainActivity : ComponentActivity() {
             var autoStartOnBoot by remember { mutableStateOf(prefs.getBoolean("auto_start_on_boot", true)) }
             var playing by remember { mutableStateOf(false) }
             var index by remember { mutableIntStateOf(0) }
+            var currentImageNeedsMotion by remember(index) { mutableStateOf(false) }
             var showSettings by remember { mutableStateOf(false) }
             var showPhotoManager by remember { mutableStateOf(false) }
             var confirmDeleteSelected by remember { mutableStateOf(false) }
@@ -624,15 +624,13 @@ class MainActivity : ComponentActivity() {
                     }
                     onDispose { remoteKeyHandler = null }
                 }
-                LaunchedEffect(images.size, playing, paused, seconds, shuffle, panZoom, currentImageLandscape, displayRotation, motionSeconds) {
+                LaunchedEffect(images.size, index, playing, paused, seconds, shuffle, panZoom, currentImageNeedsMotion, motionSeconds) {
                     if (playing && !paused && images.size > 1) {
-                        val slideSeconds = if (panZoom && (displayRotation == 90 || displayRotation == 270) && currentImageLandscape) motionSeconds else seconds
-                        while (true) {
-                            delay(slideSeconds * 1000L)
-                            index = if (shuffle) {
-                                if (images.size <= 1) 0 else (images.indices.filter { it != index }.random())
-                            } else (index + 1) % images.size
-                        }
+                        val slideSeconds = if (panZoom && currentImageNeedsMotion) maxOf(seconds, motionSeconds) else seconds
+                        delay(slideSeconds * 1000L)
+                        index = if (shuffle) {
+                            if (images.size <= 1) 0 else (images.indices.filter { it != index }.random())
+                        } else (index + 1) % images.size
                     }
                 }
                 LaunchedEffect(playing, paused, sleeping, sleepTimerMinutes, sleepDeadline) {
@@ -700,9 +698,9 @@ class MainActivity : ComponentActivity() {
                     if (sleeping) {
                         SleepScreen(showClock, showDate, weatherEnabled, weatherLabel, glassOverlay)
                     } else if (playing && images.isNotEmpty()) {
-                        PlaybackView(images, index, displayRotation, panZoom, seconds, motionSeconds, playing, paused, imageScaleMode, imagePaddingDp, playbackControlsPulse, transitionStyle, pauseMenuIndex, sleepTimerMinutes,
+                        PlaybackView(images, index, panZoom, seconds, motionSeconds, playing, paused, imageScaleMode, imagePaddingDp, playbackControlsPulse, transitionStyle, pauseMenuIndex, sleepTimerMinutes,
                             showClock, showDate, weatherEnabled, weatherLabel, glassOverlay,
-                            onImageOrientation = { currentImageLandscape = it },
+                            onImageMotionRequired = { currentImageNeedsMotion = it },
                             onPause = { paused = true; pauseMenuIndex = 0 },
                             onNext = { index = (index + 1) % images.size }, onPrevious = { index = (index - 1 + images.size) % images.size },
                             onResume = { paused = false }, onAddImages = { startPhotoUpload() }, onAddFiles = { launchPhotoChooser() },
@@ -1136,10 +1134,10 @@ private fun EmptyState() {
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
 private fun PlaybackView(
-    images: List<String>, index: Int, rotation: Int, panZoom: Boolean, seconds: Int, motionSeconds: Int, playing: Boolean,
+    images: List<String>, index: Int, panZoom: Boolean, seconds: Int, motionSeconds: Int, playing: Boolean,
     paused: Boolean, imageScaleMode: String, imagePaddingDp: Int, controlsPulse: Int, transitionStyle: String, pauseMenuIndex: Int, sleepTimerMinutes: Int,
     showClock: Boolean, showDate: Boolean, showWeather: Boolean, weatherLabel: String, glassOverlay: Boolean,
-    onImageOrientation: (Boolean) -> Unit,
+    onImageMotionRequired: (Boolean) -> Unit,
     onPause: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onResume: () -> Unit,
     onAddImages: () -> Unit, onAddFiles: () -> Unit, onCycleSpeed: (Int) -> Unit, onCycleMotionDuration: (Int) -> Unit,
     onCycleTransition: (Int) -> Unit, onCycleScale: (Int) -> Unit, onCycleSleepTimer: (Int) -> Unit,
@@ -1147,34 +1145,14 @@ private fun PlaybackView(
 ) {
     BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
         val model = images[index].removePrefix("uri:").removePrefix("file:")
-        var sourceLandscape by remember(model) { mutableStateOf(false) }
-        val panX = remember { Animatable(0f) }
-        val zoom = remember { Animatable(1f) }
         val density = LocalDensity.current
-        val panEnabled = panZoom && sourceLandscape && (rotation == 90 || rotation == 270)
-        LaunchedEffect(index, panEnabled, playing, paused, motionSeconds, maxWidth) {
-            if (panEnabled && playing && !paused) {
-                val travel = with(density) { maxWidth.toPx() * 0.035f }
-                val start = if (index % 2 == 0) -travel else travel
-                panX.snapTo(start)
-                panX.animateTo(-start, tween(motionSeconds * 1000, easing = LinearEasing))
-            } else panX.snapTo(0f)
-        }
-        LaunchedEffect(index, playing, paused, seconds, panZoom) {
-            if (panZoom && playing && !paused) {
-                while (true) {
-                    zoom.animateTo(1.035f, tween(maxOf(seconds * 3, 15) * 1000, easing = LinearEasing))
-                    zoom.animateTo(1f, tween(maxOf(seconds * 3, 15) * 1000, easing = LinearEasing))
-                }
-            } else zoom.snapTo(1f)
-        }
         var controlsVisible by remember { mutableStateOf(true) }
         LaunchedEffect(paused, controlsPulse) {
             controlsVisible = true
             if (!paused) { delay(2800); controlsVisible = false }
         }
         val transitionMs = when (transitionStyle) { "cut" -> 0; "crossfade" -> 1800; else -> 1500 }
-        AnimatedContent(targetState = model, transitionSpec = {
+        AnimatedContent(targetState = model, modifier = Modifier.fillMaxSize(), transitionSpec = {
             when (transitionStyle) {
                 "cut" -> androidx.compose.animation.EnterTransition.None togetherWith androidx.compose.animation.ExitTransition.None
                 "slide" -> (slideInHorizontally(tween(1200)) { it / 12 } + fadeIn(tween(1200))) togetherWith (slideOutHorizontally(tween(1200)) { -it / 12 } + fadeOut(tween(1200)))
@@ -1182,27 +1160,87 @@ private fun PlaybackView(
                 else -> fadeIn(tween(transitionMs)) togetherWith fadeOut(tween(transitionMs))
             }
         }, label = "photo-transition") { photo ->
-            AsyncImage(
-                model = photo,
-                contentDescription = "Slideshow Foto",
-                onSuccess = { state ->
-                    sourceLandscape = state.result.drawable.intrinsicWidth > state.result.drawable.intrinsicHeight
-                    onImageOrientation(sourceLandscape)
-                },
-                modifier = Modifier.fillMaxSize().padding(imagePaddingDp.dp).then(if (panEnabled) Modifier.clipToBounds() else Modifier)
-                    .graphicsLayer {
-                        scaleX = zoom.value
-                        scaleY = zoom.value
-                        if (panEnabled) {
-                            translationX = panX.value
+            var photoAspect by remember(photo) { mutableFloatStateOf(0f) }
+            val panX = remember(photo) { Animatable(0f) }
+            val panY = remember(photo) { Animatable(0f) }
+            val zoom = remember(photo) { Animatable(1f) }
+            BoxWithConstraints(
+                Modifier.fillMaxSize().padding(imagePaddingDp.dp).clipToBounds(),
+                contentAlignment = Alignment.Center
+            ) {
+                val viewportAspect = if (maxHeight.value > 0f) maxWidth.value / maxHeight.value else 1f
+                val imageAspect = photoAspect.takeIf { it > 0f } ?: viewportAspect
+                val motionImage = panZoom && photoAspect > 0f
+                val horizontalOverflow = motionImage && imageAspect > viewportAspect * 1.015f
+                val verticalOverflow = motionImage && imageAspect < viewportAspect / 1.015f
+                val motionRequired = horizontalOverflow || verticalOverflow
+                val imageWidth = when {
+                    !motionImage -> maxWidth
+                    imageAspect > viewportAspect -> maxHeight * imageAspect
+                    else -> maxWidth
+                }
+                val imageHeight = when {
+                    !motionImage -> maxHeight
+                    imageAspect > viewportAspect -> maxHeight
+                    else -> maxWidth / imageAspect
+                }
+                val motionDuration = if (motionRequired) maxOf(seconds, motionSeconds) else seconds
+                val direction = if (index % 2 == 0) 1f else -1f
+                val travelX = with(density) { ((imageWidth * 1.045f - maxWidth) / 2f).toPx().coerceAtLeast(0f) }
+                val travelY = with(density) { ((imageHeight * 1.045f - maxHeight) / 2f).toPx().coerceAtLeast(0f) }
+
+                LaunchedEffect(photo, photoAspect, motionRequired, playing, paused, motionDuration, travelX, travelY) {
+                    if (motionImage && playing && !paused) {
+                        zoom.snapTo(1f)
+                        panX.snapTo(if (horizontalOverflow) -travelX * direction else 0f)
+                        panY.snapTo(if (verticalOverflow) -travelY * direction else 0f)
+                        kotlinx.coroutines.coroutineScope {
+                            launch { zoom.animateTo(1.045f, tween(motionDuration * 1000, easing = LinearEasing)) }
+                            if (horizontalOverflow) launch {
+                                panX.animateTo(travelX * direction, tween(motionDuration * 1000, easing = LinearEasing))
+                            }
+                            if (verticalOverflow) launch {
+                                panY.animateTo(travelY * direction, tween(motionDuration * 1000, easing = LinearEasing))
+                            }
+                        }
+                    } else {
+                        zoom.snapTo(1f)
+                        panX.snapTo(0f)
+                        panY.snapTo(0f)
+                    }
+                }
+                LaunchedEffect(photo, photoAspect, motionRequired) {
+                    if (photo == model) onImageMotionRequired(motionRequired)
+                }
+
+                AsyncImage(
+                    model = photo,
+                    contentDescription = "Slideshow Foto",
+                    onSuccess = { state ->
+                        if (photo == model) {
+                            val width = state.result.drawable.intrinsicWidth
+                            val height = state.result.drawable.intrinsicHeight
+                            photoAspect = if (width > 0 && height > 0) width.toFloat() / height else viewportAspect
                         }
                     },
-                contentScale = if (panEnabled) ContentScale.Crop else when (imageScaleMode) {
-                    "fill" -> ContentScale.Crop
-                    "stretch" -> ContentScale.FillBounds
-                    else -> ContentScale.Fit
-                }
-            )
+                    modifier = if (motionImage) {
+                        Modifier.requiredSize(imageWidth, imageHeight).graphicsLayer {
+                            scaleX = zoom.value
+                            scaleY = zoom.value
+                            translationX = panX.value
+                            translationY = panY.value
+                        }
+                    } else Modifier.fillMaxSize().graphicsLayer {
+                        scaleX = zoom.value
+                        scaleY = zoom.value
+                    },
+                    contentScale = if (motionImage) ContentScale.FillBounds else when (imageScaleMode) {
+                        "fill" -> ContentScale.Crop
+                        "stretch" -> ContentScale.FillBounds
+                        else -> ContentScale.Fit
+                    }
+                )
+            }
         }
         if (showClock || showDate || showWeather && weatherLabel.isNotBlank()) {
             TimeWeatherOverlay(showClock, showDate, showWeather, weatherLabel, glassOverlay, imagePaddingDp)
@@ -1218,7 +1256,7 @@ private fun PlaybackView(
                             "Bilder per QR hinzufügen" to "Handy-Upload im WLAN",
                             "Dateien hinzufügen" to "Bilder auf diesem Gerät wählen",
                             "Bilddauer · ${seconds}s" to "Links/rechts ändert die Dauer",
-                            "Schwenkdauer · ${motionSeconds}s" to "Große Querformatbilder bleiben während des Schwenks sichtbar",
+                            "Schwenkdauer · ${motionSeconds}s" to "Bei abweichendem Format läuft der Schwenk vollständig durch",
                             "Übergang · ${transitionName(transitionStyle)}" to "Links/rechts wechselt den Übergang",
                             "Bilddarstellung · ${imageScaleName(imageScaleMode)}" to "Einpassen, Füllen oder Strecken",
                             "Album · ${if (selectedAlbumLabel(images, index)) "Auswahl" else "Alle Bilder"}" to "Album im Hauptmenü wechseln",
@@ -1446,7 +1484,7 @@ private fun SettingsDialog(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("Schwenken & Zoomen", fontWeight = FontWeight.SemiBold)
-                        Text("Dezenter Schwenk: Bei 5 s Bilddauer bewegt sich das Bild nur leicht. Eine ganze Schwenkbewegung dauert mindestens 15 s.", fontSize = 12.sp, color = Color.Gray)
+                        Text("Jedes Bild zoomt sanft. Passt das Seitenverhältnis nicht, füllt es die Höhe oder Breite und schwenkt vollständig durch, bevor das nächste Bild kommt.", fontSize = 12.sp, color = Color.Gray)
                     }
                     Switch(
                         checked = panZoom,
