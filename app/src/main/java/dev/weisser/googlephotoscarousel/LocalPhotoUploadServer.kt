@@ -142,26 +142,31 @@ class LocalPhotoUploadServer(
     }
 
     private fun uploadPage(): String {
-        val knownAlbums = scan(filesDir).map { it.album }.distinct().joinToString("") { album ->
-            "<option value=\"${album.replace("&", "&amp;").replace("\"", "&quot;")}\"></option>"
-        }
+        fun html(value: String) = value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&#39;")
+        val albums = scan(filesDir).map { it.album }.distinct().sorted()
+        val knownAlbums = albums.joinToString("") { album -> "<option value=\"" + html(album) + "\">" + html(album) + "</option>" }
         return """
         <!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
         <meta name="color-scheme" content="dark"><title>Fotos an Stillframe senden</title><style>
         *{box-sizing:border-box}body{margin:0;min-height:100vh;background:#10141b;color:#f5f2eb;font:17px system-ui,sans-serif;padding:22px;display:grid;place-items:center}
         main{width:min(680px,100%);background:#1b222c;border:1px solid #394654;border-radius:22px;padding:26px}h1{font-size:27px;margin:0 0 8px}p{line-height:1.5;color:#cbd2db}
-        label{display:block;margin:18px 0 8px;font-weight:650}input,button{font:inherit;width:100%;padding:14px;border-radius:12px}input{background:#10141b;color:#fff;border:1px solid #526070}input[type=file]{padding:12px}
+        label{display:block;margin:18px 0 8px;font-weight:650}input,button,select{font:inherit;width:100%;padding:14px;border-radius:12px}input,select{background:#10141b;color:#fff;border:1px solid #526070}input[type=file]{padding:12px}select{appearance:auto}.check{display:flex;gap:12px;align-items:center;margin:16px 0}.check input{width:22px;height:22px;accent-color:#e8c98c}.check label{margin:0}.hidden{display:none}
         button{margin-top:18px;border:0;background:#e8c98c;color:#10141b;font-weight:750}button:disabled{opacity:.55}.status{min-height:2em;color:#42d9ff;white-space:pre-line}.note{font-size:13px;color:#9da8b6}
         </style></head><body><main><h1>Fotos an Stillframe senden</h1>
-        <p>Wähle ein Album und Bilder aus. Die Fotos werden direkt über dein WLAN auf den Fernseher übertragen. Nur Bilder mit einer Kante über 1920 Pixel werden proportional verkleinert und als JPEG komprimiert. Passend große Fotos bleiben unverändert.</p>
-        <label for="album">Album auf dem Fernseher</label><input id="album" list="album-options" value="Erinnerungen" maxlength="40" autocomplete="off" placeholder="Albumname eingeben oder auswählen"><datalist id="album-options">$knownAlbums</datalist>
-        <p class="note">Ein vorhandener Albumname ergänzt dieses Album; ein neuer Name legt ein neues Album an.</p>
+        <p>Wähle einen vorhandenen Ordner oder erstelle einen neuen. Die Fotos werden direkt über dein WLAN auf den Fernseher übertragen.</p>
+        <label for="album">Ordner auf dem Fernseher</label><select id="album">$knownAlbums<option value="__new__">Neuer Ordner …</option></select>
+        <div id="new-folder-wrap" class="hidden"><label for="new-folder">Name des neuen Ordners</label><input id="new-folder" maxlength="40" autocomplete="off" placeholder="Zum Beispiel: Urlaub"></div>
+        <label class="check"><input id="compress" type="checkbox"><span>Bilder komprimieren</span></label>
+        <p class="note">Standardmäßig bleiben Originale unverändert. Wenn aktiviert, werden Bilder über 1920 Pixel Kantenlänge proportional verkleinert und als JPEG gespeichert.</p>
         <label for="photos">Bilder auswählen</label><input id="photos" type="file" accept="image/*" multiple>
         <button id="send">Ausgewählte Bilder hochladen</button><p class="status" id="status">Diese Seite funktioniert nur, solange der Upload auf dem Fernseher geöffnet ist.</p>
         <p class="note">Der Upload-Link ist nur für diese Sitzung gültig. Keine Google-Anmeldung erforderlich.</p></main>
         <script>
-        const input=document.getElementById('photos'), album=document.getElementById('album'), button=document.getElementById('send'), status=document.getElementById('status');
-        async function prepare(file){
+        const input=document.getElementById('photos'), album=document.getElementById('album'), newFolder=document.getElementById('new-folder'), newFolderWrap=document.getElementById('new-folder-wrap'), compress=document.getElementById('compress'), button=document.getElementById('send'), status=document.getElementById('status');
+        album.addEventListener('change',()=>{const isNew=album.value==='__new__';newFolderWrap.classList.toggle('hidden',!isNew);if(isNew)newFolder.focus();});
+        if(album.options.length===1||album.options[0].value==='__new__'){album.value='__new__';newFolderWrap.classList.remove('hidden');}
+        async function prepare(file,compressEnabled){
+          if(!compressEnabled)return {blob:file,name:file.name,type:file.type||'application/octet-stream'};
           let source=null,width=0,height=0,cleanup=()=>{};
           try{if('createImageBitmap' in window){source=await createImageBitmap(file);width=source.width;height=source.height;cleanup=()=>source.close();}}catch(_){source=null;}
           if(!source){
@@ -175,9 +180,9 @@ class LocalPhotoUploadServer(
           const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',0.86));if(!blob)return {blob:file,name:file.name,type:file.type||'application/octet-stream',original:true};
           return {blob,name:file.name.replace(/\.[^.]+$/,'')+'.jpg',type:'image/jpeg'};
         }
-        button.onclick=async()=>{const files=[...input.files];if(!files.length){status.textContent='Wähle zuerst mindestens ein Bild aus.';return}button.disabled=true;let done=0;const errors=[];
-          for(const file of files){let prepared;try{status.textContent='Bereite '+file.name+' vor …';prepared=await prepare(file);}catch(error){errors.push(file.name+': Foto konnte am Handy nicht gelesen werden.');continue}
-            try{status.textContent=(prepared.original?'Sende Original: ':'Sende ')+file.name+' …';const url='/api/upload/$token?album='+encodeURIComponent(album.value||'Erinnerungen')+'&name='+encodeURIComponent(prepared.name);let response;try{response=await fetch(url,{method:'POST',headers:{'Content-Type':prepared.type},body:prepared.blob});}catch(_){throw Error('WLAN-Upload fehlgeschlagen. Prüfe, ob beide Geräte im selben WLAN sind und der TV-Dialog noch offen ist.');}const result=await response.json();if(!response.ok)throw Error(result.error||'Übertragung fehlgeschlagen');done++;status.textContent=done+' von '+files.length+' Bildern übertragen: '+result.name;}catch(error){errors.push(file.name+': '+error.message)}}
+        button.onclick=async()=>{const files=[...input.files], albumName=album.value==='__new__'?newFolder.value.trim():album.value;if(!files.length){status.textContent='Wähle zuerst mindestens ein Bild aus.';return}if(!albumName){status.textContent='Gib einen Namen für den neuen Ordner ein.';newFolder.focus();return}button.disabled=true;let done=0;const errors=[];
+          for(const file of files){let prepared;try{status.textContent='Bereite '+file.name+' vor …';prepared=await prepare(file,compress.checked);}catch(error){errors.push(file.name+': Foto konnte am Handy nicht gelesen werden.');continue}
+            try{status.textContent=(prepared.original?'Sende Original: ':'Sende ')+file.name+' …';const url='/api/upload/$token?album='+encodeURIComponent(albumName)+'&name='+encodeURIComponent(prepared.name);let response;try{response=await fetch(url,{method:'POST',headers:{'Content-Type':prepared.type},body:prepared.blob});}catch(_){throw Error('WLAN-Upload fehlgeschlagen. Prüfe, ob beide Geräte im selben WLAN sind und der TV-Dialog noch offen ist.');}const result=await response.json();if(!response.ok)throw Error(result.error||'Übertragung fehlgeschlagen');done++;status.textContent=done+' von '+files.length+' Bildern übertragen: '+result.name;}catch(error){errors.push(file.name+': '+error.message)}}
           status.textContent=done+' von '+files.length+' Bildern übertragen.'+(errors.length?'\n'+errors.join('\n'):'');button.disabled=false;input.value='';};
         </script></body></html>
     """.trimIndent()

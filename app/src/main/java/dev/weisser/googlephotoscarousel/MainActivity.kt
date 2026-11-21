@@ -38,8 +38,12 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.itemsIndexed as gridItemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -76,6 +80,7 @@ import okhttp3.Request
 import org.json.JSONObject
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.Executors
 
 private val Ink = Color(0xFF10141B)
 private val SurfaceCard = Color(0xFF1B222C)
@@ -95,13 +100,23 @@ class MainActivity : ComponentActivity() {
     @Volatile private var remoteDebugRotation = 0
     @Volatile private var remoteDebugPortrait = false
     @Volatile private var remoteDebugSelection = "starting"
+    private val remoteLogExecutor = Executors.newSingleThreadExecutor { runnable -> Thread(runnable, "stillframe-debug-log").apply { isDaemon = true } }
     private var updateRelease by mutableStateOf<AppRelease?>(null)
     private var downloadedUpdate by mutableStateOf<File?>(null)
     private var updateBusy by mutableStateOf(false)
     private var updateStatus by mutableStateOf<String?>(null)
 
     private fun logRemote(message: String) {
-        if (BuildConfig.DEBUG) Log.i("StillframeRemote", message)
+        if (!BuildConfig.DEBUG) return
+        val line = "${System.currentTimeMillis()} $message"
+        Log.i("StillframeRemote", line)
+        remoteLogExecutor.execute {
+            runCatching {
+                val file = File(filesDir, "remote-input-debug.log")
+                if (file.length() > 512 * 1024) file.writeText("")
+                file.appendText("$line\n")
+            }
+        }
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -162,19 +177,27 @@ class MainActivity : ComponentActivity() {
             val prefs = remember { getSharedPreferences("carousel", MODE_PRIVATE) }
             val localPhotos = localPhotoUris
             var seconds by remember { mutableIntStateOf(prefs.getInt("seconds", 8)) }
+            var motionSeconds by remember { mutableIntStateOf(prefs.getInt("motion_seconds", 30)) }
+            var currentImageLandscape by remember { mutableStateOf(false) }
             var shuffle by remember { mutableStateOf(prefs.getBoolean("shuffle", false)) }
             var displayRotation by remember { mutableIntStateOf(prefs.getInt("display_rotation", 0)) }
             var orientationChosen by remember { mutableStateOf(prefs.contains("display_rotation")) }
-            var panZoom by remember { mutableStateOf(prefs.getBoolean("pan_zoom", false)) }
+            var panZoom by remember { mutableStateOf(prefs.getBoolean("pan_zoom", true)) }
             var autoStartOnBoot by remember { mutableStateOf(prefs.getBoolean("auto_start_on_boot", true)) }
             var playing by remember { mutableStateOf(false) }
             var index by remember { mutableIntStateOf(0) }
             var showSettings by remember { mutableStateOf(false) }
+            var showPhotoManager by remember { mutableStateOf(false) }
+            var confirmDeleteSelected by remember { mutableStateOf(false) }
+            var selectedPhotoModels by remember { mutableStateOf<Set<String>>(emptySet()) }
+            var photoManagerDialogFocus by remember { mutableIntStateOf(-1) }
+            var managerAlbumFilter by remember { mutableStateOf("*") }
+            var managerAlbumOptionsVisible by remember { mutableStateOf(false) }
             var setupConfirmSelected by remember { mutableStateOf(false) }
             var sourceCardFocus by remember { mutableIntStateOf(-1) }
             var focusedSettingsNode by remember { mutableIntStateOf(0) }
             var mainFocusNode by remember { mutableIntStateOf(1) }
-            var photoManagerTarget by remember { mutableStateOf("clear") }
+            var photoManagerTarget by remember { mutableStateOf("manage") }
             var focusedPhotoIndex by remember { mutableIntStateOf(0) }
             var focusRestoreNode by remember { mutableIntStateOf(1) }
             var rotationBeforeSettings by remember { mutableIntStateOf(displayRotation) }
@@ -219,9 +242,11 @@ class MainActivity : ComponentActivity() {
             val sortFocusRequester = remember { FocusRequester() }
             val playFocusRequester = remember { FocusRequester() }
             val clearPhotosFocusRequester = remember { FocusRequester() }
+            val managePhotosFocusRequester = remember { FocusRequester() }
             val updateCheckFocusRequester = remember { FocusRequester() }
             var playButtonFocused by remember { mutableStateOf(false) }
             var sortButtonFocused by remember { mutableStateOf(false) }
+            var managePhotosButtonFocused by remember { mutableStateOf(false) }
             var settingsButtonFocused by remember { mutableStateOf(false) }
             var updateCheckFocused by remember { mutableStateOf(false) }
             val uploadAlbums = uploadedPhotos.map { it.album }.distinct().sorted()
@@ -232,9 +257,15 @@ class MainActivity : ComponentActivity() {
                 if (selectedUploadAlbum != "*") selectedUploads.map { "file:${it.path}" }
                 else (localPhotos.map { "uri:$it" } + selectedUploads.map { "file:${it.path}" }).distinct()
             }
+            val managerImages = remember(localPhotos, uploadedPhotos, managerAlbumFilter) {
+                val local = if (managerAlbumFilter == "*" || managerAlbumFilter == "__local__") localPhotos.map { "uri:$it" } else emptyList()
+                val uploads = uploadedPhotos.filter { managerAlbumFilter == "*" || it.album == managerAlbumFilter }.map { "file:${it.path}" }
+                (local + uploads).distinct()
+            }
             val portraitUi = displayRotation == 90 || displayRotation == 270
             val remoteSelection = when {
                 showSettings -> "settings:$focusedSettingsNode"
+                showPhotoManager -> "photo-manager:$photoManagerDialogFocus"
                 message != null -> "dialog:message"
                 uploadUrl != null -> "dialog:upload"
                 !orientationChosen -> "setup:rotation"
@@ -263,6 +294,7 @@ class MainActivity : ComponentActivity() {
                 if (weatherEnabled && weatherCountry.matches(Regex("[A-Z]{2}")) && weatherPostal.trim().length >= 3) {
                     delay(750)
                     weatherLabel = withContext(Dispatchers.IO) { fetchWeather(weatherCountry, weatherPostal.trim()) }.orEmpty()
+                        logRemote(if (weatherLabel.isBlank()) "weather unavailable country=$weatherCountry postal=${weatherPostal.trim()}" else "weather loaded $weatherLabel")
                 }
             }
             LaunchedEffect(scheduleEnabled, scheduleWeekdaysOnly, scheduleStart, scheduleEnd, images.size, showSettings) {
@@ -294,10 +326,7 @@ class MainActivity : ComponentActivity() {
                             1 -> localSourceFocusRequester.requestFocus()
                             2 -> uploadSourceFocusRequester.requestFocus()
                             4 -> sortFocusRequester.requestFocus()
-                            5 -> {
-                                photoManagerTarget = if (localPhotos.isNotEmpty()) "clear" else "preview"
-                                if (localPhotos.isNotEmpty()) clearPhotosFocusRequester.requestFocus()
-                            }
+                            5 -> { photoManagerTarget = "manage"; managePhotosFocusRequester.requestFocus() }
                             6 -> playFocusRequester.requestFocus()
                             7 -> updateCheckFocusRequester.requestFocus()
                         }
@@ -347,7 +376,10 @@ class MainActivity : ComponentActivity() {
                     }
                     if (index >= images.size - 1) index = (images.size - 2).coerceAtLeast(0)
                 }
-                DisposableEffect(playing, paused, sleeping, images.size, orientationChosen, displayRotation, setupConfirmSelected, sourceCardFocus, focusedSettingsNode, mainFocusNode, focusedAlbumIndex, uploadAlbums, selectedUploadAlbum, newestUploadsFirst, pauseMenuIndex, showSettings, message, uploadUrl, showPinSetup, pinEntry, pinPadIndex) {
+                LaunchedEffect(playing, paused, index, images.size) {
+                    logRemote("playback state playing=$playing paused=$paused index=$index/${images.size} rotation=$displayRotation")
+                }
+                DisposableEffect(playing, paused, sleeping, images.size, orientationChosen, displayRotation, setupConfirmSelected, sourceCardFocus, focusedSettingsNode, mainFocusNode, focusedAlbumIndex, uploadAlbums, selectedUploadAlbum, newestUploadsFirst, pauseMenuIndex, showSettings, showPhotoManager, message, uploadUrl, showPinSetup, pinEntry, pinPadIndex) {
                     remoteKeyHandler = when {
                         sleeping -> { code ->
                             if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_ENTER || code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_SPACE || code in KeyEvent.KEYCODE_DPAD_UP..KeyEvent.KEYCODE_DPAD_RIGHT) {
@@ -365,6 +397,13 @@ class MainActivity : ComponentActivity() {
                                 KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_UP -> true
                                 else -> false
                             }
+                        }
+                        showPhotoManager -> { code ->
+                            if (code == KeyEvent.KEYCODE_BACK) {
+                                showPhotoManager = false
+                                focusMainNode(5)
+                                true
+                            } else false // Let Compose move through the focused image rows and dialog buttons.
                         }
                         !orientationChosen -> { code ->
                             when (code) {
@@ -397,91 +436,63 @@ class MainActivity : ComponentActivity() {
                         showSettings -> settingsKeys@{ code ->
                             when (code) {
                                 KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                                    if (focusedSettingsNode in listOf(8, 9, 14, 15)) return@settingsKeys false
-                                    if (focusedSettingsNode == 17) { imagePaddingDp = cycleValue(imagePaddingDp, listOf(0, 4, 8, 12, 16, 24, 32), 1); prefs.edit().putInt("image_padding_dp", imagePaddingDp).apply(); return@settingsKeys true }
+                                    if (focusedSettingsNode in listOf(9, 10, 15, 16)) return@settingsKeys false
+                                    if (focusedSettingsNode == 2) { imagePaddingDp = cycleValue(imagePaddingDp, listOf(0, 4, 8, 12, 16, 24, 32), 1); prefs.edit().putInt("image_padding_dp", imagePaddingDp).apply(); return@settingsKeys true }
                                     when (focusedSettingsNode) {
                                         0 -> focusedSettingsNode = 1
-                                        3 -> seconds = (seconds + 1).coerceAtMost(60)
-                                        4 -> autoStartOnBoot = !autoStartOnBoot
-                                        10 -> transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut", "slide", "zoom"), 1)
-                                        11 -> imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch"), 1)
-                                        16 -> { glassOverlay = !glassOverlay; prefs.edit().putBoolean("glass_overlay", glassOverlay).apply() }
+                                        4 -> seconds = (seconds + 1).coerceAtMost(60)
+                                        5 -> autoStartOnBoot = !autoStartOnBoot
+                                        11 -> transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut", "slide", "zoom"), 1)
+                                        12 -> imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch"), 1)
+                                        17 -> { glassOverlay = !glassOverlay; prefs.edit().putBoolean("glass_overlay", glassOverlay).apply() }
                                     }
-                                    if (focusedSettingsNode == 3) prefs.edit().putInt("seconds", seconds).apply()
-                                    if (focusedSettingsNode == 4) prefs.edit().putBoolean("auto_start_on_boot", autoStartOnBoot).apply()
+                                    if (focusedSettingsNode == 4) prefs.edit().putInt("seconds", seconds).apply()
+                                    if (focusedSettingsNode == 5) prefs.edit().putBoolean("auto_start_on_boot", autoStartOnBoot).apply()
                                     true
                                 }
                                 KeyEvent.KEYCODE_DPAD_LEFT -> {
-                                    if (focusedSettingsNode in listOf(8, 9, 14, 15)) return@settingsKeys false
-                                    if (focusedSettingsNode == 17) { imagePaddingDp = cycleValue(imagePaddingDp, listOf(0, 4, 8, 12, 16, 24, 32), -1); prefs.edit().putInt("image_padding_dp", imagePaddingDp).apply(); return@settingsKeys true }
+                                    if (focusedSettingsNode in listOf(9, 10, 15, 16)) return@settingsKeys false
+                                    if (focusedSettingsNode == 2) { imagePaddingDp = cycleValue(imagePaddingDp, listOf(0, 4, 8, 12, 16, 24, 32), -1); prefs.edit().putInt("image_padding_dp", imagePaddingDp).apply(); return@settingsKeys true }
                                     when (focusedSettingsNode) {
                                         1 -> focusedSettingsNode = 0
-                                        3 -> seconds = (seconds - 1).coerceAtLeast(3)
-                                        4 -> autoStartOnBoot = !autoStartOnBoot
-                                        10 -> transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut", "slide", "zoom"), -1)
-                                        11 -> imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch"), -1)
-                                        16 -> { glassOverlay = !glassOverlay; prefs.edit().putBoolean("glass_overlay", glassOverlay).apply() }
+                                        4 -> seconds = (seconds - 1).coerceAtLeast(3)
+                                        5 -> autoStartOnBoot = !autoStartOnBoot
+                                        11 -> transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut", "slide", "zoom"), -1)
+                                        12 -> imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch"), -1)
+                                        17 -> { glassOverlay = !glassOverlay; prefs.edit().putBoolean("glass_overlay", glassOverlay).apply() }
                                     }
-                                    if (focusedSettingsNode == 3) prefs.edit().putInt("seconds", seconds).apply()
-                                    if (focusedSettingsNode == 4) prefs.edit().putBoolean("auto_start_on_boot", autoStartOnBoot).apply()
+                                    if (focusedSettingsNode == 4) prefs.edit().putInt("seconds", seconds).apply()
+                                    if (focusedSettingsNode == 5) prefs.edit().putBoolean("auto_start_on_boot", autoStartOnBoot).apply()
                                     true
                                 }
                                 KeyEvent.KEYCODE_DPAD_DOWN -> {
-                                    if (focusedSettingsNode == 7) { focusedSettingsNode = 8; return@settingsKeys false }
-                                    if (focusedSettingsNode == 8) { focusedSettingsNode = 9; return@settingsKeys false }
-                                    if (focusedSettingsNode == 9) { focusedSettingsNode = 10; return@settingsKeys true }
-                                    if (focusedSettingsNode == 13) { focusedSettingsNode = 14; return@settingsKeys false }
-                                    if (focusedSettingsNode == 14) { focusedSettingsNode = 15; return@settingsKeys false }
-                                    if (focusedSettingsNode == 15) { focusedSettingsNode = 16; return@settingsKeys true }
-                                    if (focusedSettingsNode == 16) { focusedSettingsNode = 17; return@settingsKeys true }
-                                    if (focusedSettingsNode == 17) return@settingsKeys true
-                                    focusedSettingsNode = if (portraitUi) {
-                                        (focusedSettingsNode + 1).coerceAtMost(17)
-                                    } else when (focusedSettingsNode) {
+                                    focusedSettingsNode = if (portraitUi) (focusedSettingsNode + 1).coerceAtMost(17) else when (focusedSettingsNode) {
                                         0, 1 -> 2
-                                        2 -> 3
-                                        3 -> 4
                                         else -> (focusedSettingsNode + 1).coerceAtMost(17)
                                     }
                                     true
                                 }
                                 KeyEvent.KEYCODE_DPAD_UP -> {
-                                    if (focusedSettingsNode == 9) { focusedSettingsNode = 8; return@settingsKeys false }
-                                    if (focusedSettingsNode == 8) { focusedSettingsNode = 7; return@settingsKeys true }
-                                    if (focusedSettingsNode == 10) { focusedSettingsNode = 9; return@settingsKeys true }
-                                    if (focusedSettingsNode == 11) { focusedSettingsNode = 10; return@settingsKeys true }
-                                    if (focusedSettingsNode == 17) { focusedSettingsNode = 16; return@settingsKeys true }
-                                    if (focusedSettingsNode == 16) { focusedSettingsNode = 15; return@settingsKeys true }
-                                    if (focusedSettingsNode == 15) { focusedSettingsNode = 14; return@settingsKeys false }
-                                    if (focusedSettingsNode == 14) { focusedSettingsNode = 13; return@settingsKeys false }
-                                    if (focusedSettingsNode == 13) { focusedSettingsNode = 12; return@settingsKeys true }
-                                    focusedSettingsNode = if (portraitUi) {
-                                        (focusedSettingsNode - 1).coerceAtLeast(0)
-                                    } else when (focusedSettingsNode) {
-                                        2 -> 0
-                                        3 -> 2
-                                        4 -> 3
-                                        else -> (focusedSettingsNode - 1).coerceAtLeast(0)
-                                    }
+                                    focusedSettingsNode = (focusedSettingsNode - 1).coerceAtLeast(0)
                                     true
                                 }
                                 KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_SPACE -> {
-                                    if (focusedSettingsNode in listOf(8, 9, 14, 15)) return@settingsKeys false
+                                    if (focusedSettingsNode in listOf(9, 10, 15, 16)) return@settingsKeys false
                                     when (focusedSettingsNode) {
                                         0 -> displayRotation = nextDisplayRotation(displayRotation)
                                         1 -> { prefs.edit().putInt("display_rotation", displayRotation).apply(); showSettings = false }
-                                        2 -> { panZoom = !panZoom; prefs.edit().putBoolean("pan_zoom", panZoom).apply() }
-                                        3 -> { seconds = if (seconds >= 60) 3 else seconds + 1; prefs.edit().putInt("seconds", seconds).apply() }
-                                        4 -> { autoStartOnBoot = !autoStartOnBoot; prefs.edit().putBoolean("auto_start_on_boot", autoStartOnBoot).apply() }
-                                        5 -> { showClock = !showClock; prefs.edit().putBoolean("show_clock", showClock).apply() }
-                                        6 -> { showDate = !showDate; prefs.edit().putBoolean("show_date", showDate).apply() }
-                                        7 -> { weatherEnabled = !weatherEnabled; prefs.edit().putBoolean("show_weather", weatherEnabled).apply() }
-                                        10 -> transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut", "slide", "zoom"), 1)
-                                        11 -> imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch"), 1)
-                                        12 -> { scheduleEnabled = !scheduleEnabled; prefs.edit().putBoolean("schedule_enabled", scheduleEnabled).apply() }
-                                        13 -> { scheduleWeekdaysOnly = !scheduleWeekdaysOnly; prefs.edit().putBoolean("schedule_weekdays_only", scheduleWeekdaysOnly).apply() }
-                                        16 -> { glassOverlay = !glassOverlay; prefs.edit().putBoolean("glass_overlay", glassOverlay).apply() }
-                                        17 -> { imagePaddingDp = cycleValue(imagePaddingDp, listOf(0, 4, 8, 12, 16, 24, 32), 1); prefs.edit().putInt("image_padding_dp", imagePaddingDp).apply() }
+                                        2 -> { imagePaddingDp = cycleValue(imagePaddingDp, listOf(0, 4, 8, 12, 16, 24, 32), 1); prefs.edit().putInt("image_padding_dp", imagePaddingDp).apply() }
+                                        3 -> { panZoom = !panZoom; prefs.edit().putBoolean("pan_zoom", panZoom).apply() }
+                                        4 -> { seconds = if (seconds >= 60) 3 else seconds + 1; prefs.edit().putInt("seconds", seconds).apply() }
+                                        5 -> { autoStartOnBoot = !autoStartOnBoot; prefs.edit().putBoolean("auto_start_on_boot", autoStartOnBoot).apply() }
+                                        6 -> { showClock = !showClock; prefs.edit().putBoolean("show_clock", showClock).apply() }
+                                        7 -> { showDate = !showDate; prefs.edit().putBoolean("show_date", showDate).apply() }
+                                        8 -> { weatherEnabled = !weatherEnabled; prefs.edit().putBoolean("show_weather", weatherEnabled).apply() }
+                                        11 -> transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut", "slide", "zoom"), 1)
+                                        12 -> imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch"), 1)
+                                        13 -> { scheduleEnabled = !scheduleEnabled; prefs.edit().putBoolean("schedule_enabled", scheduleEnabled).apply() }
+                                        14 -> { scheduleWeekdaysOnly = !scheduleWeekdaysOnly; prefs.edit().putBoolean("schedule_weekdays_only", scheduleWeekdaysOnly).apply() }
+                                        17 -> { glassOverlay = !glassOverlay; prefs.edit().putBoolean("glass_overlay", glassOverlay).apply() }
                                     }
                                     prefs.edit().putString("transition_style", transitionStyle).putString("image_scale_mode", imageScaleMode).apply()
                                     true
@@ -494,20 +505,21 @@ class MainActivity : ComponentActivity() {
                                 KeyEvent.KEYCODE_DPAD_UP -> if (mainFocusNode == 5) {
                                     when (photoManagerTarget) {
                                         "delete" -> { photoManagerTarget = "preview"; true }
-                                        "preview" -> if (localPhotos.isNotEmpty()) { photoManagerTarget = "clear"; clearPhotosFocusRequester.requestFocus(); true } else navigateMainFocus(code)
+                                        "preview" -> { photoManagerTarget = "manage"; managePhotosFocusRequester.requestFocus(); true }
                                         else -> navigateMainFocus(code)
                                     }
                                 } else navigateMainFocus(code)
                                 KeyEvent.KEYCODE_DPAD_DOWN -> if (mainFocusNode == 5) {
                                     when (photoManagerTarget) {
-                                        "clear" -> if (images.isNotEmpty()) { photoManagerTarget = "preview"; focusPhoto(focusedPhotoIndex); true } else { focusMainNode(6); true }
+                                        "manage" -> if (images.isNotEmpty()) { photoManagerTarget = "preview"; focusPhoto(focusedPhotoIndex); true } else { focusMainNode(6); true }
                                         "preview" -> { photoManagerTarget = "delete"; true }
-                                        else -> true
+                                        "delete" -> { focusMainNode(6); true }
+                                        else -> { focusMainNode(6); true }
                                     }
                                 } else navigateMainFocus(code)
                                 KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
                                     if (mainFocusNode == 5) {
-                                        if (photoManagerTarget != "clear" && images.isNotEmpty()) {
+                                        if (photoManagerTarget != "manage" && images.isNotEmpty()) {
                                             val direction = if (code == KeyEvent.KEYCODE_DPAD_RIGHT) 1 else -1
                                             focusPhoto(focusedPhotoIndex + direction)
                                         }
@@ -523,7 +535,7 @@ class MainActivity : ComponentActivity() {
                                 KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_SPACE -> {
                                     if (mainFocusNode == 5) {
                                         when (photoManagerTarget) {
-                                            "clear" -> { clearPhotos(); focusMainNode(1) }
+                                            "manage" -> { showPhotoManager = true; selectedPhotoModels = emptySet(); photoManagerDialogFocus = -1 }
                                             "delete" -> {
                                                 images.getOrNull(focusedPhotoIndex)?.let(::removePhoto)
                                                 if (images.size > 1) {
@@ -557,15 +569,16 @@ class MainActivity : ComponentActivity() {
                             when (code) {
                                 KeyEvent.KEYCODE_BACK -> { playing = false; paused = false; true }
                                 KeyEvent.KEYCODE_DPAD_UP -> { pauseMenuIndex = (pauseMenuIndex - 1).coerceAtLeast(0); true }
-                                KeyEvent.KEYCODE_DPAD_DOWN -> { pauseMenuIndex = (pauseMenuIndex + 1).coerceAtMost(9); true }
+                                KeyEvent.KEYCODE_DPAD_DOWN -> { pauseMenuIndex = (pauseMenuIndex + 1).coerceAtMost(10); true }
                                 KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
                                     val direction = if (code == KeyEvent.KEYCODE_DPAD_RIGHT) 1 else -1
                                     when (pauseMenuIndex) {
                                         3 -> { seconds = (seconds + direction).coerceIn(3, 60); prefs.edit().putInt("seconds", seconds).apply() }
-                                        4 -> { transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut", "slide", "zoom"), direction); prefs.edit().putString("transition_style", transitionStyle).apply() }
-                                        5 -> { imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch"), direction); prefs.edit().putString("image_scale_mode", imageScaleMode).apply() }
-                                        6 -> { focusedAlbumIndex = (focusedAlbumIndex + direction).coerceIn(0, uploadAlbums.size); selectedUploadAlbum = if (focusedAlbumIndex == 0) "*" else uploadAlbums.getOrNull(focusedAlbumIndex - 1) ?: "*"; prefs.edit().putString("selected_upload_album", selectedUploadAlbum).apply() }
-                                        7 -> { sleepTimerMinutes = cycleValue(sleepTimerMinutes, listOf(0, 15, 30, 60), direction); prefs.edit().putInt("sleep_timer_minutes", sleepTimerMinutes).apply(); sleepDeadline = if (sleepTimerMinutes == 0) 0L else System.currentTimeMillis() + sleepTimerMinutes * 60_000L }
+                                        4 -> { motionSeconds = cycleValue(motionSeconds, listOf(15, 30, 45, 60), direction); prefs.edit().putInt("motion_seconds", motionSeconds).apply() }
+                                        5 -> { transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut", "slide", "zoom"), direction); prefs.edit().putString("transition_style", transitionStyle).apply() }
+                                        6 -> { imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch"), direction); prefs.edit().putString("image_scale_mode", imageScaleMode).apply() }
+                                        7 -> { focusedAlbumIndex = (focusedAlbumIndex + direction).coerceIn(0, uploadAlbums.size); selectedUploadAlbum = if (focusedAlbumIndex == 0) "*" else uploadAlbums.getOrNull(focusedAlbumIndex - 1) ?: "*"; prefs.edit().putString("selected_upload_album", selectedUploadAlbum).apply() }
+                                        8 -> { sleepTimerMinutes = cycleValue(sleepTimerMinutes, listOf(0, 15, 30, 60), direction); prefs.edit().putInt("sleep_timer_minutes", sleepTimerMinutes).apply(); sleepDeadline = if (sleepTimerMinutes == 0) 0L else System.currentTimeMillis() + sleepTimerMinutes * 60_000L }
                                     }
                                     true
                                 }
@@ -575,12 +588,13 @@ class MainActivity : ComponentActivity() {
                                         1 -> startPhotoUpload()
                                         2 -> launchPhotoChooser()
                                         3 -> seconds = if (seconds >= 60) 3 else seconds + 1
-                                        4 -> transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut", "slide", "zoom"), 1)
-                                        5 -> imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch"), 1)
-                                        6 -> { focusedAlbumIndex = (focusedAlbumIndex + 1).coerceIn(0, uploadAlbums.size); selectedUploadAlbum = if (focusedAlbumIndex == 0) "*" else uploadAlbums.getOrNull(focusedAlbumIndex - 1) ?: "*" }
-                                        7 -> { sleepTimerMinutes = cycleValue(sleepTimerMinutes, listOf(0, 15, 30, 60), 1); prefs.edit().putInt("sleep_timer_minutes", sleepTimerMinutes).apply(); sleepDeadline = if (sleepTimerMinutes == 0) 0L else System.currentTimeMillis() + sleepTimerMinutes * 60_000L }
-                                        8 -> { sleeping = true; manualSleepOverride = true; playing = false; paused = false; sleepDeadline = 0L }
-                                        9 -> { playing = false; paused = false; sleepDeadline = 0L }
+                                        4 -> { motionSeconds = cycleValue(motionSeconds, listOf(15, 30, 45, 60), 1); prefs.edit().putInt("motion_seconds", motionSeconds).apply() }
+                                        5 -> transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut", "slide", "zoom"), 1)
+                                        6 -> imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch"), 1)
+                                        7 -> { focusedAlbumIndex = (focusedAlbumIndex + 1).coerceIn(0, uploadAlbums.size); selectedUploadAlbum = if (focusedAlbumIndex == 0) "*" else uploadAlbums.getOrNull(focusedAlbumIndex - 1) ?: "*" }
+                                        8 -> { sleepTimerMinutes = cycleValue(sleepTimerMinutes, listOf(0, 15, 30, 60), 1); prefs.edit().putInt("sleep_timer_minutes", sleepTimerMinutes).apply(); sleepDeadline = if (sleepTimerMinutes == 0) 0L else System.currentTimeMillis() + sleepTimerMinutes * 60_000L }
+                                        9 -> { sleeping = true; manualSleepOverride = true; playing = false; paused = false; sleepDeadline = 0L }
+                                        10 -> { playing = false; paused = false; sleepDeadline = 0L }
                                     }
                                     prefs.edit().putInt("seconds", seconds).putString("transition_style", transitionStyle).putString("image_scale_mode", imageScaleMode).putString("selected_upload_album", selectedUploadAlbum).apply()
                                     true
@@ -610,10 +624,11 @@ class MainActivity : ComponentActivity() {
                     }
                     onDispose { remoteKeyHandler = null }
                 }
-                LaunchedEffect(images.size, playing, paused, seconds, shuffle) {
+                LaunchedEffect(images.size, playing, paused, seconds, shuffle, panZoom, currentImageLandscape, displayRotation, motionSeconds) {
                     if (playing && !paused && images.size > 1) {
+                        val slideSeconds = if (panZoom && (displayRotation == 90 || displayRotation == 270) && currentImageLandscape) motionSeconds else seconds
                         while (true) {
-                            delay(seconds * 1000L)
+                            delay(slideSeconds * 1000L)
                             index = if (shuffle) {
                                 if (images.size <= 1) 0 else (images.indices.filter { it != index }.random())
                             } else (index + 1) % images.size
@@ -644,6 +659,7 @@ class MainActivity : ComponentActivity() {
                     onDispose { window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
                 }
                 BackHandler(playing) { playing = false; paused = false }
+                BackHandler(showPhotoManager) { showPhotoManager = false; focusMainNode(5) }
                 BackHandler(showSettings) {
                     displayRotation = rotationBeforeSettings
                     showSettings = false
@@ -657,7 +673,7 @@ class MainActivity : ComponentActivity() {
                 BackHandler(message != null) { message = null }
                 BackHandler(showPinSetup) { showPinSetup = false; pinEntry = "" }
                 LaunchedEffect(showSettings, message, orientationChosen, uploadUrl, showPinSetup, playing, paused) {
-                    val modalVisible = showSettings || message != null || !orientationChosen || uploadUrl != null || showPinSetup
+                    val modalVisible = showSettings || showPhotoManager || message != null || !orientationChosen || uploadUrl != null || showPinSetup
                     if (modalVisible) {
                         focusManager.clearFocus(force = true)
                     } else {
@@ -666,8 +682,8 @@ class MainActivity : ComponentActivity() {
                 }
 
                 BoxWithConstraints(
-                    Modifier.fillMaxSize().background(Ink).padding(28.dp)
-                        .border(2.dp, Color(0xFF394654)).padding(14.dp),
+                    Modifier.fillMaxSize().background(Ink)
+                        .then(if (playing || sleeping) Modifier else Modifier.padding(28.dp).border(2.dp, Color(0xFF394654)).padding(14.dp)),
                     contentAlignment = Alignment.Center
                 ) {
                     val swapsDimensions = displayRotation == 90 || displayRotation == 270
@@ -680,16 +696,18 @@ class MainActivity : ComponentActivity() {
                             .graphicsLayer { rotationZ = displayRotation.toFloat() }
                             .background(Ink)
                     ) {
-                    val modalVisible = showSettings || message != null || !orientationChosen || uploadUrl != null || showPinSetup
+                            val modalVisible = showSettings || showPhotoManager || message != null || !orientationChosen || uploadUrl != null || showPinSetup
                     if (sleeping) {
                         SleepScreen(showClock, showDate, weatherEnabled, weatherLabel, glassOverlay)
                     } else if (playing && images.isNotEmpty()) {
-                        PlaybackView(images, index, displayRotation, panZoom, seconds, playing, paused, imageScaleMode, imagePaddingDp, playbackControlsPulse, transitionStyle, pauseMenuIndex, sleepTimerMinutes,
+                        PlaybackView(images, index, displayRotation, panZoom, seconds, motionSeconds, playing, paused, imageScaleMode, imagePaddingDp, playbackControlsPulse, transitionStyle, pauseMenuIndex, sleepTimerMinutes,
                             showClock, showDate, weatherEnabled, weatherLabel, glassOverlay,
+                            onImageOrientation = { currentImageLandscape = it },
                             onPause = { paused = true; pauseMenuIndex = 0 },
                             onNext = { index = (index + 1) % images.size }, onPrevious = { index = (index - 1 + images.size) % images.size },
                             onResume = { paused = false }, onAddImages = { startPhotoUpload() }, onAddFiles = { launchPhotoChooser() },
                             onCycleSpeed = { direction -> seconds = (seconds + direction).coerceIn(3, 60); prefs.edit().putInt("seconds", seconds).apply() },
+                            onCycleMotionDuration = { direction -> motionSeconds = cycleValue(motionSeconds, listOf(15, 30, 45, 60), direction); prefs.edit().putInt("motion_seconds", motionSeconds).apply() },
                             onCycleTransition = { direction -> transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut", "slide", "zoom"), direction); prefs.edit().putString("transition_style", transitionStyle).apply() },
                             onCycleScale = { direction -> imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch"), direction); prefs.edit().putString("image_scale_mode", imageScaleMode).apply() },
                             onCycleSleepTimer = { direction -> sleepTimerMinutes = cycleValue(sleepTimerMinutes, listOf(0, 15, 30, 60), direction); prefs.edit().putInt("sleep_timer_minutes", sleepTimerMinutes).apply(); sleepDeadline = if (sleepTimerMinutes == 0) 0L else System.currentTimeMillis() + sleepTimerMinutes * 60_000L },
@@ -779,12 +797,12 @@ class MainActivity : ComponentActivity() {
                                     Text("DEINE PRÄSENTATION", color = Color(0xFF9DA8B6), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
                                     Text(if (images.isEmpty()) "Bilder hinzufügen, um zu starten" else "${images.size} Bilder bereit", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
                                 }
-                                if (localPhotos.isNotEmpty()) TextButton(
-                                    modifier = Modifier.focusRequester(clearPhotosFocusRequester)
-                                        .onFocusChanged { if (it.isFocused) { mainFocusNode = 5; photoManagerTarget = "clear" } }
-                                        .then(if (mainFocusNode == 5 && photoManagerTarget == "clear") Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(12.dp)) else Modifier),
-                                    onClick = { clearPhotos(); focusMainNode(1) }
-                                ) { Text("Dateiauswahl leeren", color = if (mainFocusNode == 5 && photoManagerTarget == "clear") Color.White else Color(0xFFADB7C4)) }
+                                if (images.isNotEmpty()) TextButton(
+                                    modifier = Modifier.focusRequester(managePhotosFocusRequester)
+                                        .onFocusChanged { managePhotosButtonFocused = it.isFocused; if (it.isFocused) { mainFocusNode = 5; photoManagerTarget = "manage" } }
+                                        .then(if (managePhotosButtonFocused || mainFocusNode == 5 && photoManagerTarget == "manage") Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(12.dp)) else Modifier),
+                                    onClick = { showPhotoManager = true; selectedPhotoModels = emptySet(); photoManagerDialogFocus = -1 }
+                                ) { Text("Bilder verwalten (${images.size})", color = if (managePhotosButtonFocused || mainFocusNode == 5 && photoManagerTarget == "manage") Color.White else Color(0xFFADB7C4)) }
                             }
                             Spacer(Modifier.height(12.dp))
                             if (images.isEmpty()) EmptyState()
@@ -810,7 +828,7 @@ class MainActivity : ComponentActivity() {
                                 }
                                 Spacer(Modifier.height(20.dp))
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    Button(onClick = { playing = true; paused = false }, colors = ButtonDefaults.buttonColors(containerColor = if (playButtonFocused || mainFocusNode == 6) RemoteFocusSurface else Accent, contentColor = if (playButtonFocused || mainFocusNode == 6) Color.White else Ink), modifier = Modifier.height(54.dp).focusRequester(playFocusRequester).onFocusChanged { playButtonFocused = it.isFocused; if (it.isFocused) mainFocusNode = 6 }.then(if (playButtonFocused || mainFocusNode == 6) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(14.dp)) else Modifier)) {
+                                        Button(onClick = { logRemote("play clicked images=${images.size} rotation=$displayRotation"); if (images.isNotEmpty()) { playing = true; paused = false } else message = "Füge zuerst Bilder hinzu." }, colors = ButtonDefaults.buttonColors(containerColor = if (playButtonFocused || mainFocusNode == 6) RemoteFocusSurface else Accent, contentColor = if (playButtonFocused || mainFocusNode == 6) Color.White else Ink), modifier = Modifier.height(54.dp).focusRequester(playFocusRequester).onFocusChanged { playButtonFocused = it.isFocused; if (it.isFocused) mainFocusNode = 6 }.then(if (playButtonFocused || mainFocusNode == 6) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(14.dp)) else Modifier)) {
                                         Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(6.dp)); Text("Abspielen", fontWeight = FontWeight.Bold)
                                     }
                                     OutlinedButton(onClick = { index = (index - 1 + images.size) % images.size }, modifier = Modifier.height(54.dp)) { Icon(Icons.Default.SkipPrevious, "Vorheriges Bild") }
@@ -883,6 +901,78 @@ class MainActivity : ComponentActivity() {
                                 showSettings = false
                             }
                         )
+                    }
+                    if (showPhotoManager) {
+                        Box(Modifier.fillMaxSize().background(Color(0xCC000000)), contentAlignment = Alignment.Center) {
+                            Surface(Modifier.fillMaxWidth(0.94f).widthIn(max = 980.dp).fillMaxHeight(0.88f), color = SurfaceCard, shape = RoundedCornerShape(24.dp)) {
+                                Column(Modifier.padding(20.dp)) {
+                                    Text("Bilder verwalten", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+                                    Text("${selectedPhotoModels.size} von ${managerImages.size} ausgewählt", color = Color(0xFFB8C1CC), modifier = Modifier.padding(top = 4.dp, bottom = 4.dp))
+                                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                        Text("Ordner:", color = Color(0xFFB8C1CC), fontSize = 12.sp)
+                                        TextButton(onClick = { managerAlbumOptionsVisible = !managerAlbumOptionsVisible }) {
+                                            Text(when (managerAlbumFilter) { "__local__" -> "Dateien auf dem Gerät"; "*" -> "Alle Ordner"; else -> managerAlbumFilter })
+                                        }
+                                    }
+                                    if (managerAlbumOptionsVisible) {
+                                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            FilterChip(selected = managerAlbumFilter == "*", onClick = { managerAlbumFilter = "*"; selectedPhotoModels = emptySet() }, label = { Text("Alle") })
+                                            FilterChip(selected = managerAlbumFilter == "__local__", onClick = { managerAlbumFilter = "__local__"; selectedPhotoModels = emptySet() }, label = { Text("Dateien") })
+                                            uploadAlbums.forEach { album -> FilterChip(selected = managerAlbumFilter == album, onClick = { managerAlbumFilter = album; selectedPhotoModels = emptySet() }, label = { Text(album) }) }
+                                        }
+                                    }
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 8.dp)) {
+                                        TextButton(onClick = { selectedPhotoModels = if (selectedPhotoModels.size == managerImages.size) emptySet() else managerImages.toSet() }) {
+                                            Text(if (managerImages.isNotEmpty() && selectedPhotoModels.size == managerImages.size) "Auswahl aufheben" else "Alle auswählen")
+                                        }
+                                        TextButton(onClick = { confirmDeleteSelected = true }, enabled = selectedPhotoModels.isNotEmpty()) { Text("Löschen (${selectedPhotoModels.size})") }
+                                    }
+                                    LazyVerticalGrid(columns = GridCells.Fixed(2), modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        gridItemsIndexed(managerImages) { i, model ->
+                                            val isSelected = model in selectedPhotoModels
+                                            Column(
+                                                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                                                    .background(if (isSelected) RemoteFocusSurface else Color(0xFF121820))
+                                                    .border(if (photoManagerDialogFocus == i) 4.dp else 1.dp, if (photoManagerDialogFocus == i) RemoteFocus else Color(0x554D6175), RoundedCornerShape(12.dp))
+                                                    .onFocusChanged { if (it.isFocused) { photoManagerDialogFocus = i; logRemote("selected=photo-manager:item:$i/${managerImages.size}") } }
+                                                    .clickable { selectedPhotoModels = if (isSelected) selectedPhotoModels - model else selectedPhotoModels + model },
+                                                horizontalAlignment = Alignment.CenterHorizontally
+                                            ) {
+                                                AsyncImage(model.removePrefix("uri:").removePrefix("file:"), "Foto ${i + 1}", Modifier.fillMaxWidth().height(118.dp).clip(RoundedCornerShape(9.dp)).padding(4.dp), contentScale = ContentScale.Crop)
+                                                Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                                                    Text(model.substringAfterLast('/').substringAfterLast(':').takeLast(23), color = Color.White, modifier = Modifier.weight(1f), maxLines = 1, fontSize = 11.sp)
+                                                    Checkbox(checked = isSelected, onCheckedChange = { checked -> selectedPhotoModels = if (checked) selectedPhotoModels + model else selectedPhotoModels - model })
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+                                        TextButton(onClick = { showPhotoManager = false; focusMainNode(5) }) { Text("Schließen") }
+                                        Button(onClick = { showPhotoManager = false; focusMainNode(5) }) { Text("Fertig") }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (confirmDeleteSelected) {
+                        Box(Modifier.fillMaxSize().background(Color(0xCC000000)), contentAlignment = Alignment.Center) {
+                            Surface(Modifier.fillMaxWidth(0.86f).widthIn(max = 520.dp), color = SurfaceCard, shape = RoundedCornerShape(20.dp)) {
+                                Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text("Ausgewählte Bilder löschen?", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 20.sp)
+                                    Text("${selectedPhotoModels.size} Bilder werden von diesem Gerät entfernt.", color = Color(0xFFB8C1CC), modifier = Modifier.padding(top = 10.dp, bottom = 16.dp))
+                                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                        TextButton(onClick = { confirmDeleteSelected = false }) { Text("Abbrechen") }
+                                        Button(onClick = {
+                                            val doomed = selectedPhotoModels.toList()
+                                            confirmDeleteSelected = false
+                                            doomed.forEach(::removePhoto)
+                                            selectedPhotoModels = emptySet()
+                                            focusedPhotoIndex = focusedPhotoIndex.coerceIn(0, (images.size - 1).coerceAtLeast(0))
+                                        }) { Text("Löschen") }
+                                    }
+                                }
+                            }
+                        }
                     }
                     }
                 }
@@ -1046,11 +1136,12 @@ private fun EmptyState() {
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
 private fun PlaybackView(
-    images: List<String>, index: Int, rotation: Int, panZoom: Boolean, seconds: Int, playing: Boolean,
+    images: List<String>, index: Int, rotation: Int, panZoom: Boolean, seconds: Int, motionSeconds: Int, playing: Boolean,
     paused: Boolean, imageScaleMode: String, imagePaddingDp: Int, controlsPulse: Int, transitionStyle: String, pauseMenuIndex: Int, sleepTimerMinutes: Int,
     showClock: Boolean, showDate: Boolean, showWeather: Boolean, weatherLabel: String, glassOverlay: Boolean,
+    onImageOrientation: (Boolean) -> Unit,
     onPause: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onResume: () -> Unit,
-    onAddImages: () -> Unit, onAddFiles: () -> Unit, onCycleSpeed: (Int) -> Unit,
+    onAddImages: () -> Unit, onAddFiles: () -> Unit, onCycleSpeed: (Int) -> Unit, onCycleMotionDuration: (Int) -> Unit,
     onCycleTransition: (Int) -> Unit, onCycleScale: (Int) -> Unit, onCycleSleepTimer: (Int) -> Unit,
     onSleepNow: () -> Unit, onExit: () -> Unit
 ) {
@@ -1058,39 +1149,51 @@ private fun PlaybackView(
         val model = images[index].removePrefix("uri:").removePrefix("file:")
         var sourceLandscape by remember(model) { mutableStateOf(false) }
         val panX = remember { Animatable(0f) }
+        val zoom = remember { Animatable(1f) }
         val density = LocalDensity.current
         val panEnabled = panZoom && sourceLandscape && (rotation == 90 || rotation == 270)
-        LaunchedEffect(index, panEnabled, playing, paused, seconds, maxWidth) {
+        LaunchedEffect(index, panEnabled, playing, paused, motionSeconds, maxWidth) {
             if (panEnabled && playing && !paused) {
-                val travel = with(density) { maxWidth.toPx() * 0.06f }
+                val travel = with(density) { maxWidth.toPx() * 0.035f }
                 val start = if (index % 2 == 0) -travel else travel
                 panX.snapTo(start)
-                panX.animateTo(-start, tween(maxOf(seconds * 3, 15) * 1000, easing = LinearEasing))
+                panX.animateTo(-start, tween(motionSeconds * 1000, easing = LinearEasing))
             } else panX.snapTo(0f)
         }
+        LaunchedEffect(index, playing, paused, seconds, panZoom) {
+            if (panZoom && playing && !paused) {
+                while (true) {
+                    zoom.animateTo(1.035f, tween(maxOf(seconds * 3, 15) * 1000, easing = LinearEasing))
+                    zoom.animateTo(1f, tween(maxOf(seconds * 3, 15) * 1000, easing = LinearEasing))
+                }
+            } else zoom.snapTo(1f)
+        }
         var controlsVisible by remember { mutableStateOf(true) }
-        LaunchedEffect(index, paused, controlsPulse) {
+        LaunchedEffect(paused, controlsPulse) {
             controlsVisible = true
             if (!paused) { delay(2800); controlsVisible = false }
         }
-        val transitionMs = when (transitionStyle) { "cut" -> 0; "crossfade" -> 1100; else -> 1800 }
+        val transitionMs = when (transitionStyle) { "cut" -> 0; "crossfade" -> 1800; else -> 1500 }
         AnimatedContent(targetState = model, transitionSpec = {
             when (transitionStyle) {
                 "cut" -> androidx.compose.animation.EnterTransition.None togetherWith androidx.compose.animation.ExitTransition.None
-                "slide" -> (slideInHorizontally(tween(700)) { it / 9 } + fadeIn(tween(700))) togetherWith (slideOutHorizontally(tween(700)) { -it / 9 } + fadeOut(tween(700)))
-                "zoom" -> (scaleIn(tween(900), initialScale = 0.96f) + fadeIn(tween(900))) togetherWith fadeOut(tween(900))
+                "slide" -> (slideInHorizontally(tween(1200)) { it / 12 } + fadeIn(tween(1200))) togetherWith (slideOutHorizontally(tween(1200)) { -it / 12 } + fadeOut(tween(1200)))
+                "zoom" -> (scaleIn(tween(1400), initialScale = 0.985f) + fadeIn(tween(1400))) togetherWith fadeOut(tween(1400))
                 else -> fadeIn(tween(transitionMs)) togetherWith fadeOut(tween(transitionMs))
             }
         }, label = "photo-transition") { photo ->
             AsyncImage(
                 model = photo,
                 contentDescription = "Slideshow Foto",
-                onSuccess = { state -> sourceLandscape = state.result.drawable.intrinsicWidth > state.result.drawable.intrinsicHeight },
-                modifier = Modifier.fillMaxSize().then(if (panEnabled) Modifier.clipToBounds() else Modifier.padding(imagePaddingDp.dp))
+                onSuccess = { state ->
+                    sourceLandscape = state.result.drawable.intrinsicWidth > state.result.drawable.intrinsicHeight
+                    onImageOrientation(sourceLandscape)
+                },
+                modifier = Modifier.fillMaxSize().padding(imagePaddingDp.dp).then(if (panEnabled) Modifier.clipToBounds() else Modifier)
                     .graphicsLayer {
+                        scaleX = zoom.value
+                        scaleY = zoom.value
                         if (panEnabled) {
-                            scaleX = 1.08f
-                            scaleY = 1.08f
                             translationX = panX.value
                         }
                     },
@@ -1102,7 +1205,7 @@ private fun PlaybackView(
             )
         }
         if (showClock || showDate || showWeather && weatherLabel.isNotBlank()) {
-            TimeWeatherOverlay(showClock, showDate, showWeather, weatherLabel, glassOverlay)
+            TimeWeatherOverlay(showClock, showDate, showWeather, weatherLabel, glassOverlay, imagePaddingDp)
         }
         if (paused) {
             Box(Modifier.fillMaxSize().background(Color(0x66000000)), contentAlignment = Alignment.Center) {
@@ -1115,6 +1218,7 @@ private fun PlaybackView(
                             "Bilder per QR hinzufügen" to "Handy-Upload im WLAN",
                             "Dateien hinzufügen" to "Bilder auf diesem Gerät wählen",
                             "Bilddauer · ${seconds}s" to "Links/rechts ändert die Dauer",
+                            "Schwenkdauer · ${motionSeconds}s" to "Große Querformatbilder bleiben während des Schwenks sichtbar",
                             "Übergang · ${transitionName(transitionStyle)}" to "Links/rechts wechselt den Übergang",
                             "Bilddarstellung · ${imageScaleName(imageScaleMode)}" to "Einpassen, Füllen oder Strecken",
                             "Album · ${if (selectedAlbumLabel(images, index)) "Auswahl" else "Alle Bilder"}" to "Album im Hauptmenü wechseln",
@@ -1135,11 +1239,12 @@ private fun PlaybackView(
                                         1 -> onAddImages()
                                         2 -> onAddFiles()
                                         3 -> onCycleSpeed(1)
-                                        4 -> onCycleTransition(1)
-                                        5 -> onCycleScale(1)
-                                        7 -> onCycleSleepTimer(1)
-                                        8 -> onSleepNow()
-                                        9 -> onExit()
+                                        4 -> onCycleMotionDuration(1)
+                                        5 -> onCycleTransition(1)
+                                        6 -> onCycleScale(1)
+                                        8 -> onCycleSleepTimer(1)
+                                        9 -> onSleepNow()
+                                        10 -> onExit()
                                     }
                                 }
                             ) {
@@ -1165,7 +1270,7 @@ private fun PlaybackView(
 }
 
 @Composable
-private fun TimeWeatherOverlay(showClock: Boolean, showDate: Boolean, showWeather: Boolean, weatherLabel: String, glassOverlay: Boolean) {
+private fun TimeWeatherOverlay(showClock: Boolean, showDate: Boolean, showWeather: Boolean, weatherLabel: String, glassOverlay: Boolean, imagePaddingDp: Int) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { delay(15_000); now = System.currentTimeMillis() } }
     val date = remember(now) { java.text.SimpleDateFormat("EEEE, d. MMMM", java.util.Locale.GERMANY).format(java.util.Date(now)) }
@@ -1178,7 +1283,7 @@ private fun TimeWeatherOverlay(showClock: Boolean, showDate: Boolean, showWeathe
             .background(Brush.linearGradient(listOf(Color(0x99FFFFFF), Color(0x553D536A), Color(0xAA141B25))))
             .border(1.dp, Brush.linearGradient(listOf(Color(0xCCFFFFFF), Color(0x3383D8FF), Color(0x66FFFFFF))), shape)
         else Modifier.clip(RoundedCornerShape(14.dp)).background(Color(0x990E1116))
-        Row(Modifier.fillMaxWidth().padding(24.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
+        Row(Modifier.fillMaxWidth().padding((imagePaddingDp + 42).dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
             if (showClock) Text(time, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Medium,
                 modifier = Modifier.then(glassModifier).padding(horizontal = if (glassOverlay) 18.dp else 12.dp, vertical = if (glassOverlay) 12.dp else 8.dp))
             Column(Modifier.then(glassModifier).padding(horizontal = if (glassOverlay) 18.dp else 12.dp, vertical = if (glassOverlay) 12.dp else 8.dp), horizontalAlignment = Alignment.End) {
@@ -1198,15 +1303,10 @@ private fun SleepScreen(showClock: Boolean, showDate: Boolean, showWeather: Bool
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         if (showClock || showDate || showWeather && weatherLabel.isNotBlank()) {
             val shape = RoundedCornerShape(28.dp)
-            val glassModifier = if (glassOverlay) Modifier
-                .shadow(20.dp, shape)
-                .clip(shape)
-                .background(Brush.linearGradient(listOf(Color(0x66FFFFFF), Color(0x223D536A), Color(0x66141B25))))
-                .border(1.dp, Brush.linearGradient(listOf(Color(0xCCFFFFFF), Color(0x3383D8FF), Color(0x66FFFFFF))), shape)
-            else Modifier
-            Column(Modifier.align(Alignment.Center).then(glassModifier).padding(horizontal = if (glassOverlay) 38.dp else 0.dp, vertical = if (glassOverlay) 26.dp else 0.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                if (showClock) Text(time, color = Color.White, fontSize = 68.sp, fontWeight = FontWeight.Light)
-                if (showDate) Text(date, color = Color(0xFFB8C1CC), fontSize = 21.sp)
+            // Sleep mode stays visually dark; don't draw the glass outline or its blue highlight.
+            Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+                if (showClock) Text(time, color = Color(0xFF686D75), fontSize = 68.sp, fontWeight = FontWeight.Normal)
+                if (showDate) Text(date, color = Color(0xFF4C525A), fontSize = 21.sp)
             }
             if (showWeather && weatherLabel.isNotBlank()) {
                 val weatherGlass = if (glassOverlay) Modifier.shadow(14.dp, RoundedCornerShape(18.dp)).clip(RoundedCornerShape(18.dp)).background(Brush.linearGradient(listOf(Color(0x99FFFFFF), Color(0x66141B25)))).border(1.dp, Color(0x88FFFFFF), RoundedCornerShape(18.dp)) else Modifier
@@ -1276,15 +1376,15 @@ private fun SettingsDialog(
     val countryFocus = remember { FocusRequester() }
     val postalFocus = remember { FocusRequester() }
     LaunchedEffect(focusedSettingsNode) {
-        val position = (settingsScroll.maxValue * (focusedSettingsNode.coerceIn(0, 16) / 16f)).toInt()
+        val position = (settingsScroll.maxValue * (focusedSettingsNode.coerceIn(0, 17) / 17f)).toInt()
         runCatching { settingsScroll.animateScrollTo(position) }
         delay(50)
         runCatching {
             when (focusedSettingsNode) {
-                8 -> countryFocus.requestFocus()
-                9 -> postalFocus.requestFocus()
-                14 -> scheduleStartFocus.requestFocus()
-                15 -> scheduleEndFocus.requestFocus()
+                9 -> countryFocus.requestFocus()
+                10 -> postalFocus.requestFocus()
+                15 -> scheduleStartFocus.requestFocus()
+                16 -> scheduleEndFocus.requestFocus()
             }
         }
     }
@@ -1335,6 +1435,13 @@ private fun SettingsDialog(
                         confirmButton(Modifier.weight(1f))
                     }
                 }
+                Spacer(Modifier.height(10.dp))
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(if (focusedSettingsNode == 2) RemoteFocusSurface else Color.Transparent)
+                    .then(if (focusedSettingsNode == 2) Modifier.border(3.dp, RemoteFocus, RoundedCornerShape(12.dp)) else Modifier).padding(horizontal = 10.dp, vertical = 6.dp)) {
+                    Text("Bildrand · ${imagePaddingDp} dp", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    Slider(value = imagePaddingDp.toFloat(), onValueChange = { onImagePadding((it / 4f).toInt() * 4) }, valueRange = 0f..32f, steps = 7,
+                        modifier = Modifier.focusProperties { canFocus = false })
+                }
                 Spacer(Modifier.height(16.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
@@ -1345,7 +1452,7 @@ private fun SettingsDialog(
                         checked = panZoom,
                         onCheckedChange = onPanZoom,
                         modifier = Modifier.focusProperties { canFocus = false }
-                            .then(if (focusedSettingsNode == 2) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(24.dp)) else Modifier)
+                            .then(if (focusedSettingsNode == 3) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(24.dp)) else Modifier)
                     )
                 }
                 Spacer(Modifier.height(14.dp))
@@ -1355,7 +1462,7 @@ private fun SettingsDialog(
                     onValueChange = { onSeconds(it.toInt().coerceIn(3, 60)) },
                     valueRange = 3f..60f,
                     modifier = Modifier.focusProperties { canFocus = false }
-                        .then(if (focusedSettingsNode == 3) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(12.dp)) else Modifier)
+                        .then(if (focusedSettingsNode == 4) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(12.dp)) else Modifier)
                 )
                 Spacer(Modifier.height(16.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1367,13 +1474,13 @@ private fun SettingsDialog(
                         checked = autoStartOnBoot,
                         onCheckedChange = onAutoStartOnBoot,
                         modifier = Modifier.focusProperties { canFocus = false }
-                            .then(if (focusedSettingsNode == 4) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(24.dp)) else Modifier)
+                            .then(if (focusedSettingsNode == 5) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(24.dp)) else Modifier)
                     )
                 }
                 Spacer(Modifier.height(10.dp))
-                SettingsToggle("Uhr im Schlafmodus", "Im Ruhebildschirm die Uhrzeit zeigen.", showClock, 5, focusedSettingsNode, onShowClock)
-                SettingsToggle("Datum im Schlafmodus", "Datum unter der Uhr anzeigen.", showDate, 6, focusedSettingsNode, onShowDate)
-                SettingsToggle("Wetter anzeigen", "Aktuelles Wetter unten in der Ecke.", showWeather, 7, focusedSettingsNode, onShowWeather)
+                SettingsToggle("Uhr im Schlafmodus", "Im Ruhebildschirm die Uhrzeit zeigen.", showClock, 6, focusedSettingsNode, onShowClock)
+                SettingsToggle("Datum im Schlafmodus", "Datum unter der Uhr anzeigen.", showDate, 7, focusedSettingsNode, onShowDate)
+                SettingsToggle("Wetter anzeigen", "Aktuelles Wetter unten in der Ecke.", showWeather, 8, focusedSettingsNode, onShowWeather)
                 Text("Wetter-Ort", color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 10.dp))
                 Text("Land (ISO-Code) und Postleitzahl, zum Beispiel DE · 10115", color = Color(0xFFB8C1CC), fontSize = 12.sp)
                 OutlinedTextField(
@@ -1381,38 +1488,34 @@ private fun SettingsDialog(
                     onValueChange = onWeatherCountry,
                     label = { Text("Land") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth().focusRequester(countryFocus).onFocusChanged { if (it.isFocused) onFocusedNode(8) }
-                        .then(if (focusedSettingsNode == 8) Modifier.border(3.dp, RemoteFocus, RoundedCornerShape(12.dp)) else Modifier)
+                    modifier = Modifier.fillMaxWidth().focusRequester(countryFocus).onFocusChanged { if (it.isFocused) onFocusedNode(9) }
+                        .then(if (focusedSettingsNode == 9) Modifier.border(3.dp, RemoteFocus, RoundedCornerShape(12.dp)) else Modifier)
                 )
                 OutlinedTextField(
                     value = weatherPostal,
                     onValueChange = onWeatherPostal,
                     label = { Text("Postleitzahl") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth().focusRequester(postalFocus).onFocusChanged { if (it.isFocused) onFocusedNode(9) }
-                        .then(if (focusedSettingsNode == 9) Modifier.border(3.dp, RemoteFocus, RoundedCornerShape(12.dp)) else Modifier)
+                    modifier = Modifier.fillMaxWidth().focusRequester(postalFocus).onFocusChanged { if (it.isFocused) onFocusedNode(10) }
+                        .then(if (focusedSettingsNode == 10) Modifier.border(3.dp, RemoteFocus, RoundedCornerShape(12.dp)) else Modifier)
                 )
                 Spacer(Modifier.height(12.dp))
                 Text("Übergang · ${transitionName(transitionStyle)}", color = Color.White, fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(if (focusedSettingsNode == 10) RemoteFocusSurface else Color.Transparent).clickable { onTransitionStyle(cycleValue(transitionStyle, listOf("fade", "crossfade", "cut", "slide", "zoom"), 1)) }.padding(12.dp))
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(if (focusedSettingsNode == 11) RemoteFocusSurface else Color.Transparent).clickable { onTransitionStyle(cycleValue(transitionStyle, listOf("fade", "crossfade", "cut", "slide", "zoom"), 1)) }.padding(12.dp))
                 Text("Bilddarstellung · ${imageScaleName(imageScaleMode)}", color = Color.White, fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(if (focusedSettingsNode == 11) RemoteFocusSurface else Color.Transparent).clickable { onImageScaleMode(cycleValue(imageScaleMode, listOf("fit", "fill", "stretch"), 1)) }.padding(12.dp))
-                SettingsToggle("Zeitplan verwenden", "Außerhalb der aktiven Zeit automatisch schlafen.", scheduleEnabled, 12, focusedSettingsNode, onScheduleEnabled)
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(if (focusedSettingsNode == 12) RemoteFocusSurface else Color.Transparent).clickable { onImageScaleMode(cycleValue(imageScaleMode, listOf("fit", "fill", "stretch"), 1)) }.padding(12.dp))
+                SettingsToggle("Zeitplan verwenden", "Außerhalb der aktiven Zeit automatisch schlafen.", scheduleEnabled, 13, focusedSettingsNode, onScheduleEnabled)
                 Text("Aktive Tage · ${if (scheduleWeekdaysOnly) "Montag bis Freitag" else "Täglich"}", color = Color.White, fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(if (focusedSettingsNode == 13) RemoteFocusSurface else Color.Transparent).clickable { onScheduleDays(!scheduleWeekdaysOnly) }.padding(12.dp))
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(if (focusedSettingsNode == 14) RemoteFocusSurface else Color.Transparent).clickable { onScheduleDays(!scheduleWeekdaysOnly) }.padding(12.dp))
                 Text("Aktive Zeit", color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 10.dp))
                 Text("${if (scheduleWeekdaysOnly) "Mo–Fr" else "Jeden Tag"} ${scheduleStart.ifBlank { "16:00" }}–${scheduleEnd.ifBlank { "21:00" }} · außerhalb zeigt die App den Schlafbildschirm.", color = Color(0xFFB8C1CC), fontSize = 12.sp)
-                SettingsToggle("Liquid-Glass-Optik", "Leichtes Glas mit transparentem Verlauf und Lichtkante für Uhr, Datum und Wetter.", glassOverlay, 16, focusedSettingsNode, onGlassOverlay)
+                SettingsToggle("Liquid-Glass-Optik", "Leichtes Glas mit transparentem Verlauf und Lichtkante für Uhr, Datum und Wetter.", glassOverlay, 17, focusedSettingsNode, onGlassOverlay)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedTextField(value = scheduleStart, onValueChange = { value -> if (value.length <= 5 && value.all { it.isDigit() || it == ':' }) onScheduleStart(value) }, label = { Text("Von · HH:MM") }, singleLine = true,
-                        modifier = Modifier.weight(1f).focusRequester(scheduleStartFocus).onFocusChanged { if (it.isFocused) onFocusedNode(14) }.then(if (focusedSettingsNode == 14) Modifier.border(3.dp, RemoteFocus, RoundedCornerShape(12.dp)) else Modifier))
+                        modifier = Modifier.weight(1f).focusRequester(scheduleStartFocus).onFocusChanged { if (it.isFocused) onFocusedNode(15) }.then(if (focusedSettingsNode == 15) Modifier.border(3.dp, RemoteFocus, RoundedCornerShape(12.dp)) else Modifier))
                     OutlinedTextField(value = scheduleEnd, onValueChange = { value -> if (value.length <= 5 && value.all { it.isDigit() || it == ':' }) onScheduleEnd(value) }, label = { Text("Bis · HH:MM") }, singleLine = true,
-                        modifier = Modifier.weight(1f).focusRequester(scheduleEndFocus).onFocusChanged { if (it.isFocused) onFocusedNode(15) }.then(if (focusedSettingsNode == 15) Modifier.border(3.dp, RemoteFocus, RoundedCornerShape(12.dp)) else Modifier))
+                        modifier = Modifier.weight(1f).focusRequester(scheduleEndFocus).onFocusChanged { if (it.isFocused) onFocusedNode(16) }.then(if (focusedSettingsNode == 16) Modifier.border(3.dp, RemoteFocus, RoundedCornerShape(12.dp)) else Modifier))
                 }
-                Text("Bildrand · ${imagePaddingDp} dp", color = Color.White, fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(if (focusedSettingsNode == 17) RemoteFocusSurface else Color.Transparent)
-                        .clickable { onImagePadding(cycleValue(imagePaddingDp, listOf(0, 4, 8, 12, 16, 24, 32), 1)) }.padding(12.dp))
-                Text("Links/rechts ändert den Abstand zum Bildrand.", color = Color(0xFFB8C1CC), fontSize = 12.sp)
             }
         }
     }
@@ -1420,7 +1523,9 @@ private fun SettingsDialog(
 
 @Composable
 private fun SettingsToggle(title: String, description: String, checked: Boolean, node: Int, focusedNode: Int, onToggle: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp).then(if (focusedNode == node) Modifier.border(3.dp, RemoteFocus, RoundedCornerShape(12.dp)) else Modifier), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(if (focusedNode == node) RemoteFocusSurface else Color.Transparent)
+        .then(if (focusedNode == node) Modifier.border(3.dp, RemoteFocus, RoundedCornerShape(12.dp)) else Modifier)
+        .clickable { onToggle(!checked) }.padding(vertical = 6.dp, horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(title, fontWeight = FontWeight.SemiBold)
             Text(description, fontSize = 12.sp, color = Color.Gray)
@@ -1503,15 +1608,40 @@ private fun fetchWeather(country: String, postal: String): String? = runCatching
     val encodedPostal = URLEncoder.encode(postal.trim(), "UTF-8")
     val encodedCountry = URLEncoder.encode(country.trim().uppercase(), "UTF-8")
     val geocodeUrl = "https://geocoding-api.open-meteo.com/v1/search?name=$encodedPostal&count=10&language=de&format=json&countryCode=$encodedCountry"
-    val placeJson = client.newCall(Request.Builder().url(geocodeUrl).build()).execute().use { response ->
-        if (!response.isSuccessful) return null
-        JSONObject(response.body?.string().orEmpty())
+    var placeName: String? = null
+    var latitude = Double.NaN
+    var longitude = Double.NaN
+    runCatching {
+        client.newCall(Request.Builder().url(geocodeUrl).build()).execute().use { response ->
+            if (response.isSuccessful) {
+                val places = JSONObject(response.body?.string().orEmpty()).optJSONArray("results")
+                if (places != null && places.length() > 0) {
+                    val place = places.getJSONObject(0)
+                    latitude = place.optDouble("latitude", Double.NaN)
+                    longitude = place.optDouble("longitude", Double.NaN)
+                    placeName = place.optString("name").takeIf { it.isNotBlank() }
+                }
+            }
+        }
     }
-    val places = placeJson.optJSONArray("results") ?: return null
-    if (places.length() == 0) return null
-    val place = places.getJSONObject(0)
-    val latitude = place.optDouble("latitude")
-    val longitude = place.optDouble("longitude")
+    // Open-Meteo's postal-code search misses some valid German PLZs. Use a
+    // postal-code geocoder as fallback, then keep Open-Meteo for the forecast.
+    if (!latitude.isFinite() || !longitude.isFinite()) {
+        val postalUrl = "https://api.zippopotam.us/${country.trim().uppercase()}/$encodedPostal"
+        runCatching {
+            client.newCall(Request.Builder().url(postalUrl).build()).execute().use { response ->
+                if (response.isSuccessful) {
+                    val places = JSONObject(response.body?.string().orEmpty()).optJSONArray("places")
+                    if (places != null && places.length() > 0) {
+                        val place = places.getJSONObject(0)
+                        latitude = place.optString("latitude").toDoubleOrNull() ?: Double.NaN
+                        longitude = place.optString("longitude").toDoubleOrNull() ?: Double.NaN
+                        placeName = place.optString("place name").takeIf { it.isNotBlank() }
+                    }
+                }
+            }
+        }
+    }
     if (!latitude.isFinite() || !longitude.isFinite()) return null
     val weatherUrl = "https://api.open-meteo.com/v1/forecast?latitude=$latitude&longitude=$longitude&current=temperature_2m,weather_code&timezone=auto"
     val weather = client.newCall(Request.Builder().url(weatherUrl).build()).execute().use { response ->
@@ -1532,7 +1662,7 @@ private fun fetchWeather(country: String, postal: String): String? = runCatching
         95, 96, 99 -> "Gewitter"
         else -> "Wetter"
     }
-    "${place.optString("name")} · ${temp.toInt()}°C · $description"
+    "${placeName.orEmpty()} · ${temp.toInt()}°C · $description"
 }.getOrNull()
 
 private fun isValidScheduleTime(value: String): Boolean {
