@@ -95,8 +95,10 @@ class MainActivity : ComponentActivity() {
     private var localPhotoUris by mutableStateOf<List<String>>(emptyList())
     private var uploadedPhotos by mutableStateOf<List<UploadedPhoto>>(emptyList())
     private var uploadUrl by mutableStateOf<String?>(null)
+    private var uploadDialogVisible by mutableStateOf(false)
     private var uploadStatus by mutableStateOf("")
     private var uploadServer: LocalPhotoUploadServer? = null
+    private var phoneNoteUpdate by mutableStateOf<String?>(null)
     private var remoteKeyHandler: ((Int) -> Boolean)? = null
     private val remoteHandledKeys = mutableSetOf<Int>()
     private var playbackControlsPulse by mutableIntStateOf(0)
@@ -242,6 +244,16 @@ class MainActivity : ComponentActivity() {
             var calendarStatus by remember { mutableStateOf("") }
             var notesEnabled by remember { mutableStateOf(prefs.getBoolean("notes_enabled", false)) }
             var noteText by remember { mutableStateOf(prefs.getString("note_text", "").orEmpty()) }
+            LaunchedEffect(phoneNoteUpdate) {
+                phoneNoteUpdate?.let { updated ->
+                    noteText = updated
+                    notesEnabled = true
+                    phoneNoteUpdate = null
+                }
+            }
+            LaunchedEffect(orientationChosen) {
+                if (orientationChosen && uploadServer == null && uploadUrl == null) startPhotoUpload(showDialog = false)
+            }
             var scheduleEnabled by remember { mutableStateOf(prefs.getBoolean("schedule_enabled", false)) }
             var scheduleWeekdaysOnly by remember { mutableStateOf(prefs.getBoolean("schedule_weekdays_only", true)) }
             var scheduleStart by remember { mutableStateOf(prefs.getString("schedule_start", "16:00") ?: "16:00") }
@@ -287,7 +299,7 @@ class MainActivity : ComponentActivity() {
                 showSettings -> "settings:$focusedSettingsNode"
                 showPhotoManager -> "photo-manager:$photoManagerDialogFocus"
                 message != null -> "dialog:message"
-                uploadUrl != null -> "dialog:upload"
+                uploadDialogVisible -> "dialog:upload"
                 !orientationChosen -> "setup:rotation"
                 playing && paused -> "pause-menu:$pauseMenuIndex"
                 playing -> "slideshow:$index/${images.size}"
@@ -439,7 +451,7 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(playing, paused, index, images.size) {
                     logRemote("playback state playing=$playing paused=$paused index=$index/${images.size} rotation=$displayRotation")
                 }
-                DisposableEffect(playing, paused, sleeping, images.size, orientationChosen, displayRotation, setupConfirmSelected, sourceCardFocus, focusedSettingsNode, mainFocusNode, focusedAlbumIndex, uploadAlbums, selectedUploadAlbum, newestUploadsFirst, pauseMenuIndex, showSettings, showPhotoManager, message, uploadUrl, showPinSetup, pinEntry, pinPadIndex) {
+                DisposableEffect(playing, paused, sleeping, images.size, orientationChosen, displayRotation, setupConfirmSelected, sourceCardFocus, focusedSettingsNode, mainFocusNode, focusedAlbumIndex, uploadAlbums, selectedUploadAlbum, newestUploadsFirst, pauseMenuIndex, showSettings, showPhotoManager, message, uploadUrl, uploadDialogVisible, showPinSetup, pinEntry, pinPadIndex) {
                     remoteKeyHandler = when {
                         sleeping -> { code ->
                             if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_ENTER || code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_SPACE || code in KeyEvent.KEYCODE_DPAD_UP..KeyEvent.KEYCODE_DPAD_RIGHT) {
@@ -450,9 +462,9 @@ class MainActivity : ComponentActivity() {
                                 true
                             } else false
                         }
-                        uploadUrl != null -> { code ->
+                        uploadDialogVisible -> { code ->
                             when (code) {
-                                KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_SPACE -> { stopPhotoUpload(); true }
+                                KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_SPACE -> { closeUploadQr(); true }
                                 KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_DOWN,
                                 KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_UP -> true
                                 else -> false
@@ -740,7 +752,7 @@ class MainActivity : ComponentActivity() {
                     displayRotation = rotationBeforeSettings
                     showSettings = false
                 }
-                BackHandler(uploadUrl != null) { stopPhotoUpload() }
+                BackHandler(uploadDialogVisible) { closeUploadQr() }
                 BackHandler(!orientationChosen) {
                     displayRotation = 0
                     prefs.edit().putInt("display_rotation", 0).apply()
@@ -748,8 +760,8 @@ class MainActivity : ComponentActivity() {
                 }
                 BackHandler(message != null) { message = null }
                 BackHandler(showPinSetup) { showPinSetup = false; pinEntry = "" }
-                LaunchedEffect(showSettings, message, orientationChosen, uploadUrl, showPinSetup, playing, paused) {
-                    val modalVisible = showSettings || showPhotoManager || message != null || !orientationChosen || uploadUrl != null || showPinSetup
+                LaunchedEffect(showSettings, message, orientationChosen, uploadDialogVisible, showPinSetup, playing, paused) {
+                    val modalVisible = showSettings || showPhotoManager || message != null || !orientationChosen || uploadDialogVisible || showPinSetup
                     if (modalVisible) {
                         focusManager.clearFocus(force = true)
                     } else {
@@ -772,7 +784,7 @@ class MainActivity : ComponentActivity() {
                             .graphicsLayer { rotationZ = displayRotation.toFloat() }
                             .background(Ink)
                     ) {
-                            val modalVisible = showSettings || showPhotoManager || message != null || !orientationChosen || uploadUrl != null || showPinSetup
+                            val modalVisible = showSettings || showPhotoManager || message != null || !orientationChosen || uploadDialogVisible || showPinSetup
                     if (sleeping) {
                         SleepScreen(showClock, showDate, weatherEnabled, weatherLabel, glassOverlay, if (calendarEnabled) calendarEvents else emptyList(), if (notesEnabled) noteText else "")
                     } else if (playing && images.isNotEmpty()) {
@@ -958,7 +970,7 @@ class MainActivity : ComponentActivity() {
                             }
                         )
                     }
-                    uploadUrl?.let { url -> UploadQrDialog(url, uploadedPhotos.size, uploadStatus, onClose = { stopPhotoUpload() }) }
+                    if (uploadDialogVisible) uploadUrl?.let { url -> UploadQrDialog(url, uploadedPhotos.size, uploadStatus, onClose = { closeUploadQr() }) }
                     message?.let { text -> InlineMessageDialog(text) { message = null } }
                     if (showSettings) {
                         SettingsDialog(
@@ -1067,6 +1079,11 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     }
+                    if (uploadUrl != null && !uploadDialogVisible && orientationChosen && !showSettings && !showPhotoManager && message == null && !showPinSetup && !confirmDeleteSelected) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomEnd) {
+                            PersistentQrBadge(uploadUrl!!, Modifier.padding(12.dp)) { startPhotoUpload() }
+                        }
+                    }
                     }
                 }
             }
@@ -1084,29 +1101,54 @@ class MainActivity : ComponentActivity() {
         uploadedPhotos = LocalPhotoUploadServer.scan(filesDir)
     }
 
-    private fun startPhotoUpload() {
-        if (uploadUrl != null) return
-        val server = LocalPhotoUploadServer(filesDir) { _, _ ->
-            runOnUiThread {
-                refreshUploadedPhotos()
-                uploadStatus = "${uploadedPhotos.size} Bilder empfangen. Du kannst weitere senden."
-            }
+    private fun startPhotoUpload(showDialog: Boolean = true) {
+        if (uploadServer != null && uploadUrl != null) {
+            uploadDialogVisible = showDialog
+            return
         }
+        val prefs = getSharedPreferences("carousel", MODE_PRIVATE)
+        val server = LocalPhotoUploadServer(
+            filesDir = filesDir,
+            onPhotoUploaded = { _, _ ->
+                runOnUiThread {
+                    refreshUploadedPhotos()
+                    uploadStatus = "${uploadedPhotos.size} Bilder empfangen. Du kannst weitere senden."
+                }
+            },
+            readNote = { prefs.getString("note_text", "").orEmpty() },
+            onNoteUpdated = { updated ->
+                runOnUiThread {
+                    prefs.edit().putString("note_text", updated).putBoolean("notes_enabled", true).apply()
+                    phoneNoteUpdate = updated
+                    uploadStatus = "Notiz auf dem Fernseher gespeichert."
+                }
+            }
+        )
         try {
             uploadServer = server
             uploadStatus = "Warte auf Bilder von deinem Handy …"
             uploadUrl = server.start()
+            uploadDialogVisible = showDialog
         } catch (error: Exception) {
             server.stop()
             uploadServer = null
-            message = error.localizedMessage ?: "Der Handy-Upload konnte nicht gestartet werden."
+            uploadUrl = null
+            uploadDialogVisible = false
+            if (showDialog) message = error.localizedMessage ?: "Der Handy-Upload konnte nicht gestartet werden."
         }
+    }
+
+    private fun closeUploadQr() {
+        uploadDialogVisible = false
+        uploadStatus = ""
+        refreshUploadedPhotos()
     }
 
     private fun stopPhotoUpload() {
         uploadServer?.stop()
         uploadServer = null
         uploadUrl = null
+        uploadDialogVisible = false
         uploadStatus = ""
         refreshUploadedPhotos()
     }
@@ -2040,6 +2082,34 @@ private fun InlineMessageDialog(message: String, onClose: () -> Unit) {
                 ) { Text("OK") }
             }
         }
+    }
+}
+
+@Composable
+private fun PersistentQrBadge(url: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(18.dp)
+    val bitmap = remember(url) {
+        runCatching {
+            val matrix = QRCodeWriter().encode(url, BarcodeFormat.QR_CODE, 280, 280)
+            android.graphics.Bitmap.createBitmap(280, 280, android.graphics.Bitmap.Config.ARGB_8888).apply {
+                for (x in 0 until 280) for (y in 0 until 280) setPixel(x, y, if (matrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
+            }.asImageBitmap()
+        }.getOrNull()
+    }
+    Column(
+        modifier.width(112.dp).clip(shape)
+            .background(Brush.linearGradient(listOf(Color(0x553E4D5E), Color(0xDD111820))))
+            .border(1.dp, Color(0x667F91A4), shape)
+            .clickable(onClick = onClick)
+            .padding(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        if (bitmap != null) {
+            Image(bitmap, "Notiz oder Fotos hinzufügen", Modifier.size(84.dp).clip(RoundedCornerShape(8.dp)).background(Color.White).padding(4.dp))
+        } else {
+            Icon(Icons.Default.QrCode2, "Notiz oder Fotos hinzufügen", tint = Accent, modifier = Modifier.size(84.dp))
+        }
+        Text("Hinzufügen", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }
 }
 
