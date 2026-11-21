@@ -153,7 +153,7 @@ class LocalPhotoUploadServer(
         label{display:block;margin:18px 0 8px;font-weight:650}input,button{font:inherit;width:100%;padding:14px;border-radius:12px}input{background:#10141b;color:#fff;border:1px solid #526070}input[type=file]{padding:12px}
         button{margin-top:18px;border:0;background:#e8c98c;color:#10141b;font-weight:750}button:disabled{opacity:.55}.status{min-height:2em;color:#42d9ff;white-space:pre-line}.note{font-size:13px;color:#9da8b6}
         </style></head><body><main><h1>Fotos an Stillframe senden</h1>
-        <p>Wähle ein Album und Bilder aus. Die Fotos werden direkt über dein WLAN auf den Fernseher übertragen. Große Bilder werden vorher auf maximal 1920 × 1920 Pixel verkleinert und als JPEG komprimiert.</p>
+        <p>Wähle ein Album und Bilder aus. Die Fotos werden direkt über dein WLAN auf den Fernseher übertragen. Nur Bilder mit einer Kante über 1920 Pixel werden proportional verkleinert und als JPEG komprimiert. Passend große Fotos bleiben unverändert.</p>
         <label for="album">Album auf dem Fernseher</label><input id="album" list="album-options" value="Erinnerungen" maxlength="40" autocomplete="off" placeholder="Albumname eingeben oder auswählen"><datalist id="album-options">$knownAlbums</datalist>
         <p class="note">Ein vorhandener Albumname ergänzt dieses Album; ein neuer Name legt ein neues Album an.</p>
         <label for="photos">Bilder auswählen</label><input id="photos" type="file" accept="image/*" multiple>
@@ -168,7 +168,7 @@ class LocalPhotoUploadServer(
             try{const objectUrl=URL.createObjectURL(file);const image=await new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(Error('Das Handy kann dieses Foto nicht decodieren.'));img.src=objectUrl;});source=image;width=image.naturalWidth;height=image.naturalHeight;cleanup=()=>URL.revokeObjectURL(objectUrl);}catch(_){return {blob:file,name:file.name,type:file.type||'application/octet-stream',original:true};}
           }
           const scale=Math.min(1,1920/width,1920/height);
-          if(scale===1&&file.size<=8*1024*1024){cleanup();return {blob:file,name:file.name,type:file.type||'application/octet-stream'};}
+          if(scale===1&&file.size<=50*1024*1024){cleanup();return {blob:file,name:file.name,type:file.type||'application/octet-stream'};}
           const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(width*scale));canvas.height=Math.max(1,Math.round(height*scale));
           const ctx=canvas.getContext('2d');if(!ctx){cleanup();return {blob:file,name:file.name,type:file.type||'application/octet-stream',original:true};}
           ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(source,0,0,canvas.width,canvas.height);cleanup();

@@ -17,7 +17,7 @@ Eine leichte Diashow für Android TV und Fire TV. Sie ist für Fernseher gedacht
 
 ## Handy-Upload und lokale Alben
 
-Wähle **Handy-Upload**, scanne den QR-Code und öffne die angezeigte Seite auf einem Smartphone im selben WLAN. Dort kannst du einen Albumname und mehrere Bilder angeben. Bilder, die größer als 1920 × 1920 Pixel oder 8 MB sind, werden im Browser proportional verkleinert und als JPEG komprimiert, bevor sie übertragen werden. In der App lassen sich Upload-Alben filtern und einzelne Bilder löschen.
+Wähle **Handy-Upload**, scanne den QR-Code und öffne die angezeigte Seite auf einem Smartphone im selben WLAN. Dort kannst du einen Albumname und mehrere Bilder angeben. Nur Bilder mit einer Kante über 1920 Pixel werden im Browser proportional verkleinert und als JPEG komprimiert. Bereits passende Fotos bleiben unverändert, damit sie nicht unnötig an Qualität verlieren. In der App lassen sich Upload-Alben filtern und einzelne Bilder löschen.
 
 Der Upload-Server läuft nur, solange sein QR-Dialog offen ist. Der zufällige Link gilt für diese Sitzung; Uploads sind auf lokale Netzwerkadressen beschränkt und pro Datei auf 50 MB begrenzt. Entwickleroptionen sind nicht erforderlich. Ein optionaler vierstelliger PIN ist für den Handy-Upload vorgesehen.
 

@@ -38,6 +38,7 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -89,6 +90,7 @@ class MainActivity : ComponentActivity() {
     private var uploadServer: LocalPhotoUploadServer? = null
     private var remoteKeyHandler: ((Int) -> Boolean)? = null
     private val remoteHandledKeys = mutableSetOf<Int>()
+    private var playbackControlsPulse by mutableIntStateOf(0)
     private var updateRelease by mutableStateOf<AppRelease?>(null)
     private var downloadedUpdate by mutableStateOf<File?>(null)
     private var updateBusy by mutableStateOf(false)
@@ -96,9 +98,13 @@ class MainActivity : ComponentActivity() {
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         val keyCode = event.keyCode
-        if (event.action == KeyEvent.ACTION_DOWN && remoteKeyHandler?.invoke(keyCode) == true) {
-            remoteHandledKeys += keyCode
-            return true
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            val handled = remoteKeyHandler?.invoke(keyCode) == true
+            if (handled) {
+                playbackControlsPulse++
+                remoteHandledKeys += keyCode
+                return true
+            }
         }
         if (event.action == KeyEvent.ACTION_UP && remoteHandledKeys.remove(keyCode)) return true
         return super.dispatchKeyEvent(event)
@@ -142,6 +148,8 @@ class MainActivity : ComponentActivity() {
             var sourceCardFocus by remember { mutableIntStateOf(-1) }
             var focusedSettingsNode by remember { mutableIntStateOf(0) }
             var mainFocusNode by remember { mutableIntStateOf(1) }
+            var photoManagerTarget by remember { mutableStateOf("clear") }
+            var focusedPhotoIndex by remember { mutableIntStateOf(0) }
             var focusRestoreNode by remember { mutableIntStateOf(1) }
             var rotationBeforeSettings by remember { mutableIntStateOf(displayRotation) }
             var selectedUploadAlbum by remember { mutableStateOf(prefs.getString("selected_upload_album", "*") ?: "*") }
@@ -150,7 +158,13 @@ class MainActivity : ComponentActivity() {
             var paused by remember { mutableStateOf(false) }
             var pauseMenuIndex by remember { mutableIntStateOf(0) }
             var transitionStyle by remember { mutableStateOf(prefs.getString("transition_style", "fade") ?: "fade") }
-            var imageScaleMode by remember { mutableStateOf(prefs.getString("image_scale_mode", "fit") ?: "fit") }
+            if (!prefs.getBoolean("fill_default_migrated", false)) {
+                val editor = prefs.edit()
+                if (prefs.getString("image_scale_mode", null) == "fit") editor.putString("image_scale_mode", "fill")
+                editor.putBoolean("fill_default_migrated", true).apply()
+            }
+            var imageScaleMode by remember { mutableStateOf(prefs.getString("image_scale_mode", "fill") ?: "fill") }
+            var imagePaddingDp by remember { mutableIntStateOf(prefs.getInt("image_padding_dp", 0)) }
             var showPinSetup by remember { mutableStateOf(false) }
             var pinEntry by remember { mutableStateOf("") }
             var pinPadIndex by remember { mutableIntStateOf(0) }
@@ -171,12 +185,14 @@ class MainActivity : ComponentActivity() {
             var scheduleStart by remember { mutableStateOf(prefs.getString("schedule_start", "16:00") ?: "16:00") }
             var scheduleEnd by remember { mutableStateOf(prefs.getString("schedule_end", "21:00") ?: "21:00") }
             val focusManager = LocalFocusManager.current
+            val photoListState = rememberLazyListState()
+            val uiScope = rememberCoroutineScope()
             val settingsFocusRequester = remember { FocusRequester() }
             val localSourceFocusRequester = remember { FocusRequester() }
             val uploadSourceFocusRequester = remember { FocusRequester() }
             val sortFocusRequester = remember { FocusRequester() }
             val playFocusRequester = remember { FocusRequester() }
-            val photoManageFocusRequester = remember { FocusRequester() }
+            val clearPhotosFocusRequester = remember { FocusRequester() }
             val updateCheckFocusRequester = remember { FocusRequester() }
             var playButtonFocused by remember { mutableStateOf(false) }
             var sortButtonFocused by remember { mutableStateOf(false) }
@@ -191,14 +207,19 @@ class MainActivity : ComponentActivity() {
                 else (localPhotos.map { "uri:$it" } + selectedUploads.map { "file:${it.path}" }).distinct()
             }
             val portraitUi = displayRotation == 90 || displayRotation == 270
+            LaunchedEffect(images.size) {
+                focusedPhotoIndex = focusedPhotoIndex.coerceIn(0, (images.size - 1).coerceAtLeast(0))
+                if (images.isEmpty()) photoManagerTarget = "clear"
+            }
             LaunchedEffect(uploadAlbums, selectedUploadAlbum) {
                 focusedAlbumIndex = if (selectedUploadAlbum == "*") 0 else (uploadAlbums.indexOf(selectedUploadAlbum) + 1).coerceAtLeast(0)
             }
             LaunchedEffect(weatherEnabled, weatherCountry, weatherPostal) {
-                if (weatherEnabled && weatherPostal.isNotBlank()) {
-                    weatherLabel = "Wetter wird geladen …"
-                    weatherLabel = withContext(Dispatchers.IO) { fetchWeather(weatherCountry, weatherPostal) } ?: "Wetter nicht verfügbar"
-                } else weatherLabel = ""
+                weatherLabel = ""
+                if (weatherEnabled && weatherCountry.matches(Regex("[A-Z]{2}")) && weatherPostal.trim().length >= 3) {
+                    delay(750)
+                    weatherLabel = withContext(Dispatchers.IO) { fetchWeather(weatherCountry, weatherPostal.trim()) }.orEmpty()
+                }
             }
             LaunchedEffect(scheduleEnabled, scheduleWeekdaysOnly, scheduleStart, scheduleEnd, images.size, showSettings) {
                 if (scheduleEnabled && !showSettings) {
@@ -229,11 +250,18 @@ class MainActivity : ComponentActivity() {
                             1 -> localSourceFocusRequester.requestFocus()
                             2 -> uploadSourceFocusRequester.requestFocus()
                             4 -> sortFocusRequester.requestFocus()
-                            5 -> photoManageFocusRequester.requestFocus()
+                            5 -> {
+                                photoManagerTarget = if (localPhotos.isNotEmpty()) "clear" else "preview"
+                                if (localPhotos.isNotEmpty()) clearPhotosFocusRequester.requestFocus()
+                            }
                             6 -> playFocusRequester.requestFocus()
                             7 -> updateCheckFocusRequester.requestFocus()
                         }
                     }
+                }
+                fun focusPhoto(index: Int) {
+                    focusedPhotoIndex = index.coerceIn(0, (images.size - 1).coerceAtLeast(0))
+                    uiScope.launch { runCatching { photoListState.animateScrollToItem(focusedPhotoIndex) } }
                 }
                 fun navigateMainFocus(code: Int, from: Int = mainFocusNode): Boolean {
                     if (code !in setOf(KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT)) return false
@@ -326,6 +354,7 @@ class MainActivity : ComponentActivity() {
                             when (code) {
                                 KeyEvent.KEYCODE_DPAD_RIGHT -> {
                                     if (focusedSettingsNode in listOf(8, 9, 14, 15)) return@settingsKeys false
+                                    if (focusedSettingsNode == 17) { imagePaddingDp = cycleValue(imagePaddingDp, listOf(0, 4, 8, 12, 16, 24, 32), 1); prefs.edit().putInt("image_padding_dp", imagePaddingDp).apply(); return@settingsKeys true }
                                     when (focusedSettingsNode) {
                                         0 -> focusedSettingsNode = 1
                                         3 -> seconds = (seconds + 1).coerceAtMost(60)
@@ -340,6 +369,7 @@ class MainActivity : ComponentActivity() {
                                 }
                                 KeyEvent.KEYCODE_DPAD_LEFT -> {
                                     if (focusedSettingsNode in listOf(8, 9, 14, 15)) return@settingsKeys false
+                                    if (focusedSettingsNode == 17) { imagePaddingDp = cycleValue(imagePaddingDp, listOf(0, 4, 8, 12, 16, 24, 32), -1); prefs.edit().putInt("image_padding_dp", imagePaddingDp).apply(); return@settingsKeys true }
                                     when (focusedSettingsNode) {
                                         1 -> focusedSettingsNode = 0
                                         3 -> seconds = (seconds - 1).coerceAtLeast(3)
@@ -359,14 +389,15 @@ class MainActivity : ComponentActivity() {
                                     if (focusedSettingsNode == 13) { focusedSettingsNode = 14; return@settingsKeys false }
                                     if (focusedSettingsNode == 14) { focusedSettingsNode = 15; return@settingsKeys false }
                                     if (focusedSettingsNode == 15) { focusedSettingsNode = 16; return@settingsKeys true }
-                                    if (focusedSettingsNode == 16) return@settingsKeys true
+                                    if (focusedSettingsNode == 16) { focusedSettingsNode = 17; return@settingsKeys true }
+                                    if (focusedSettingsNode == 17) return@settingsKeys true
                                     focusedSettingsNode = if (portraitUi) {
-                                        (focusedSettingsNode + 1).coerceAtMost(16)
+                                        (focusedSettingsNode + 1).coerceAtMost(17)
                                     } else when (focusedSettingsNode) {
                                         0, 1 -> 2
                                         2 -> 3
                                         3 -> 4
-                                        else -> (focusedSettingsNode + 1).coerceAtMost(16)
+                                        else -> (focusedSettingsNode + 1).coerceAtMost(17)
                                     }
                                     true
                                 }
@@ -375,6 +406,7 @@ class MainActivity : ComponentActivity() {
                                     if (focusedSettingsNode == 8) { focusedSettingsNode = 7; return@settingsKeys true }
                                     if (focusedSettingsNode == 10) { focusedSettingsNode = 9; return@settingsKeys true }
                                     if (focusedSettingsNode == 11) { focusedSettingsNode = 10; return@settingsKeys true }
+                                    if (focusedSettingsNode == 17) { focusedSettingsNode = 16; return@settingsKeys true }
                                     if (focusedSettingsNode == 16) { focusedSettingsNode = 15; return@settingsKeys true }
                                     if (focusedSettingsNode == 15) { focusedSettingsNode = 14; return@settingsKeys false }
                                     if (focusedSettingsNode == 14) { focusedSettingsNode = 13; return@settingsKeys false }
@@ -405,6 +437,7 @@ class MainActivity : ComponentActivity() {
                                         12 -> { scheduleEnabled = !scheduleEnabled; prefs.edit().putBoolean("schedule_enabled", scheduleEnabled).apply() }
                                         13 -> { scheduleWeekdaysOnly = !scheduleWeekdaysOnly; prefs.edit().putBoolean("schedule_weekdays_only", scheduleWeekdaysOnly).apply() }
                                         16 -> { glassOverlay = !glassOverlay; prefs.edit().putBoolean("glass_overlay", glassOverlay).apply() }
+                                        17 -> { imagePaddingDp = cycleValue(imagePaddingDp, listOf(0, 4, 8, 12, 16, 24, 32), 1); prefs.edit().putInt("image_padding_dp", imagePaddingDp).apply() }
                                     }
                                     prefs.edit().putString("transition_style", transitionStyle).putString("image_scale_mode", imageScaleMode).apply()
                                     true
@@ -414,10 +447,28 @@ class MainActivity : ComponentActivity() {
                         }
                         orientationChosen && !playing && mainFocusNode in 0..7 -> mainKeys@{ code ->
                             when (code) {
-                                KeyEvent.KEYCODE_DPAD_UP -> if (mainFocusNode == 5) navigateMainFocus(code) else navigateMainFocus(code)
-                                KeyEvent.KEYCODE_DPAD_DOWN -> if (mainFocusNode == 5) { focusMainNode(6); true } else navigateMainFocus(code)
+                                KeyEvent.KEYCODE_DPAD_UP -> if (mainFocusNode == 5) {
+                                    when (photoManagerTarget) {
+                                        "delete" -> { photoManagerTarget = "preview"; true }
+                                        "preview" -> if (localPhotos.isNotEmpty()) { photoManagerTarget = "clear"; clearPhotosFocusRequester.requestFocus(); true } else navigateMainFocus(code)
+                                        else -> navigateMainFocus(code)
+                                    }
+                                } else navigateMainFocus(code)
+                                KeyEvent.KEYCODE_DPAD_DOWN -> if (mainFocusNode == 5) {
+                                    when (photoManagerTarget) {
+                                        "clear" -> if (images.isNotEmpty()) { photoManagerTarget = "preview"; focusPhoto(focusedPhotoIndex); true } else { focusMainNode(6); true }
+                                        "preview" -> { photoManagerTarget = "delete"; true }
+                                        else -> true
+                                    }
+                                } else navigateMainFocus(code)
                                 KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                                    if (mainFocusNode == 5) return@mainKeys false
+                                    if (mainFocusNode == 5) {
+                                        if (photoManagerTarget != "clear" && images.isNotEmpty()) {
+                                            val direction = if (code == KeyEvent.KEYCODE_DPAD_RIGHT) 1 else -1
+                                            focusPhoto(focusedPhotoIndex + direction)
+                                        }
+                                        return@mainKeys true
+                                    }
                                     when (mainFocusNode) {
                                         3 -> focusedAlbumIndex = (focusedAlbumIndex + if (code == KeyEvent.KEYCODE_DPAD_RIGHT) 1 else -1).coerceIn(0, uploadAlbums.size)
                                         4 -> { newestUploadsFirst = !newestUploadsFirst; prefs.edit().putBoolean("newest_uploads_first", newestUploadsFirst).apply() }
@@ -426,7 +477,20 @@ class MainActivity : ComponentActivity() {
                                     true
                                 }
                                 KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_SPACE -> {
-                                    if (mainFocusNode == 5) return@mainKeys false
+                                    if (mainFocusNode == 5) {
+                                        when (photoManagerTarget) {
+                                            "clear" -> { clearPhotos(); focusMainNode(1) }
+                                            "delete" -> {
+                                                images.getOrNull(focusedPhotoIndex)?.let(::removePhoto)
+                                                if (images.size > 1) {
+                                                    focusedPhotoIndex = focusedPhotoIndex.coerceAtMost(images.size - 2)
+                                                    photoManagerTarget = "preview"
+                                                } else focusMainNode(1)
+                                            }
+                                            else -> index = focusedPhotoIndex.coerceIn(0, (images.size - 1).coerceAtLeast(0))
+                                        }
+                                        return@mainKeys true
+                                    }
                                     when (mainFocusNode) {
                                         0 -> { rotationBeforeSettings = displayRotation; focusedSettingsNode = 0; showSettings = true }
                                         1 -> photoChooser.launch(arrayOf("image/*"))
@@ -436,7 +500,7 @@ class MainActivity : ComponentActivity() {
                                             prefs.edit().putString("selected_upload_album", selectedUploadAlbum).apply()
                                         }
                                         4 -> { newestUploadsFirst = !newestUploadsFirst; prefs.edit().putBoolean("newest_uploads_first", newestUploadsFirst).apply() }
-                                        5 -> { /* Photo list receives its own focus. */ }
+                                        5 -> { /* Photo manager is handled above. */ }
                                         6 -> if (images.isNotEmpty()) { playing = true; paused = false } else message = "Füge zuerst Bilder hinzu."
                                         7 -> if (updateRelease != null) downloadOrInstallUpdate() else checkForUpdates(force = true)
                                     }
@@ -576,7 +640,7 @@ class MainActivity : ComponentActivity() {
                     if (sleeping) {
                         SleepScreen(showClock, showDate, weatherEnabled, weatherLabel, glassOverlay)
                     } else if (playing && images.isNotEmpty()) {
-                        PlaybackView(images, index, displayRotation, panZoom, seconds, playing, paused, imageScaleMode, transitionStyle, pauseMenuIndex, sleepTimerMinutes,
+                        PlaybackView(images, index, displayRotation, panZoom, seconds, playing, paused, imageScaleMode, imagePaddingDp, playbackControlsPulse, transitionStyle, pauseMenuIndex, sleepTimerMinutes,
                             showClock, showDate, weatherEnabled, weatherLabel, glassOverlay,
                             onPause = { paused = true; pauseMenuIndex = 0 },
                             onNext = { index = (index + 1) % images.size }, onPrevious = { index = (index - 1 + images.size) % images.size },
@@ -671,16 +735,32 @@ class MainActivity : ComponentActivity() {
                                     Text("DEINE PRÄSENTATION", color = Color(0xFF9DA8B6), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
                                     Text(if (images.isEmpty()) "Bilder hinzufügen, um zu starten" else "${images.size} Bilder bereit", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
                                 }
-                                if (images.isNotEmpty()) TextButton(onClick = { clearPhotos() }) { Text("Leeren", color = Color(0xFFADB7C4)) }
+                                if (localPhotos.isNotEmpty()) TextButton(
+                                    modifier = Modifier.focusRequester(clearPhotosFocusRequester)
+                                        .onFocusChanged { if (it.isFocused) { mainFocusNode = 5; photoManagerTarget = "clear" } }
+                                        .then(if (mainFocusNode == 5 && photoManagerTarget == "clear") Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(12.dp)) else Modifier),
+                                    onClick = { clearPhotos(); focusMainNode(1) }
+                                ) { Text("Dateiauswahl leeren", color = if (mainFocusNode == 5 && photoManagerTarget == "clear") Color.White else Color(0xFFADB7C4)) }
                             }
                             Spacer(Modifier.height(12.dp))
                             if (images.isEmpty()) EmptyState()
                             else {
-                                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 8.dp)) {
+                                LazyRow(state = photoListState, horizontalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 8.dp)) {
                                     itemsIndexed(images) { i, model ->
-                                        Box(Modifier.size(142.dp, 104.dp).border(if (mainFocusNode == 5 && i == 0) 3.dp else 0.dp, RemoteFocus, RoundedCornerShape(12.dp)).clip(RoundedCornerShape(12.dp)).background(SurfaceCard)) {
-                                            AsyncImage(model = model.removePrefix("uri:").removePrefix("file:"), contentDescription = "Vorschau Bild ${i + 1}", modifier = Modifier.fillMaxSize().then(if (i == 0) Modifier.focusRequester(photoManageFocusRequester) else Modifier).focusable().onFocusChanged { if (it.isFocused) mainFocusNode = 5 }.clickable { index = i; playing = true }, contentScale = ContentScale.Crop)
-                                            IconButton(onClick = { removePhoto(model) }, modifier = Modifier.align(Alignment.TopEnd).size(38.dp).background(Color(0xCC10141B), RoundedCornerShape(30.dp))) { Icon(Icons.Default.Delete, "Bild löschen", tint = Color.White, modifier = Modifier.size(20.dp)) }
+                                        val previewFocused = mainFocusNode == 5 && focusedPhotoIndex == i && photoManagerTarget == "preview"
+                                        val deleteFocused = mainFocusNode == 5 && focusedPhotoIndex == i && photoManagerTarget == "delete"
+                                        Box(Modifier.size(142.dp, 104.dp)
+                                            .border(if (previewFocused) 4.dp else 1.dp, if (previewFocused) RemoteFocus else Color(0x554D6175), RoundedCornerShape(12.dp))
+                                            .clip(RoundedCornerShape(12.dp)).background(SurfaceCard)) {
+                                            AsyncImage(model = model.removePrefix("uri:").removePrefix("file:"), contentDescription = "Vorschau Bild ${i + 1}", modifier = Modifier.fillMaxSize()
+                                                .clickable { focusedPhotoIndex = i; photoManagerTarget = "preview"; mainFocusNode = 5; index = i }, contentScale = ContentScale.Crop)
+                                            IconButton(onClick = {
+                                                removePhoto(model)
+                                                if (images.size > 1) { focusedPhotoIndex = focusedPhotoIndex.coerceAtMost(images.size - 2); photoManagerTarget = "preview" }
+                                                else focusMainNode(1)
+                                            }, modifier = Modifier.align(Alignment.TopEnd).size(38.dp)
+                                                .then(if (deleteFocused) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(30.dp)) else Modifier)
+                                                .background(if (deleteFocused) Color(0xFFB3261E) else Color(0xCC10141B), RoundedCornerShape(30.dp))) { Icon(Icons.Default.Delete, "Bild löschen", tint = Color.White, modifier = Modifier.size(20.dp)) }
                                         }
                                     }
                                 }
@@ -732,7 +812,7 @@ class MainActivity : ComponentActivity() {
                     if (showSettings) {
                         SettingsDialog(
                             seconds, panZoom, displayRotation, focusedSettingsNode, portraitUi, autoStartOnBoot,
-                            showClock, showDate, weatherEnabled, weatherCountry, weatherPostal, transitionStyle, imageScaleMode, glassOverlay,
+                            showClock, showDate, weatherEnabled, weatherCountry, weatherPostal, transitionStyle, imageScaleMode, glassOverlay, imagePaddingDp,
                             scheduleEnabled, scheduleWeekdaysOnly, scheduleStart, scheduleEnd,
                             onFocusedNode = { focusedSettingsNode = it },
                             onAutoStartOnBoot = { autoStartOnBoot = it; prefs.edit().putBoolean("auto_start_on_boot", it).apply() },
@@ -744,6 +824,7 @@ class MainActivity : ComponentActivity() {
                             onWeatherPostal = { weatherPostal = it; prefs.edit().putString("weather_postal", it).apply() },
                             onTransitionStyle = { transitionStyle = it; prefs.edit().putString("transition_style", it).apply() },
                             onImageScaleMode = { imageScaleMode = it; prefs.edit().putString("image_scale_mode", it).apply() },
+                            onImagePadding = { imagePaddingDp = it; prefs.edit().putInt("image_padding_dp", it).apply() },
                             onScheduleEnabled = { scheduleEnabled = it; prefs.edit().putBoolean("schedule_enabled", it).apply() },
                             onScheduleDays = { scheduleWeekdaysOnly = it; prefs.edit().putBoolean("schedule_weekdays_only", it).apply() },
                             onScheduleStart = { scheduleStart = it; prefs.edit().putString("schedule_start", it).apply() },
@@ -922,7 +1003,7 @@ private fun EmptyState() {
 @Composable
 private fun PlaybackView(
     images: List<String>, index: Int, rotation: Int, panZoom: Boolean, seconds: Int, playing: Boolean,
-    paused: Boolean, imageScaleMode: String, transitionStyle: String, pauseMenuIndex: Int, sleepTimerMinutes: Int,
+    paused: Boolean, imageScaleMode: String, imagePaddingDp: Int, controlsPulse: Int, transitionStyle: String, pauseMenuIndex: Int, sleepTimerMinutes: Int,
     showClock: Boolean, showDate: Boolean, showWeather: Boolean, weatherLabel: String, glassOverlay: Boolean,
     onPause: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onResume: () -> Unit,
     onAddImages: () -> Unit, onAddFiles: () -> Unit, onCycleSpeed: (Int) -> Unit,
@@ -943,6 +1024,11 @@ private fun PlaybackView(
                 panX.animateTo(-start, tween(maxOf(seconds * 3, 15) * 1000, easing = LinearEasing))
             } else panX.snapTo(0f)
         }
+        var controlsVisible by remember { mutableStateOf(true) }
+        LaunchedEffect(index, paused, controlsPulse) {
+            controlsVisible = true
+            if (!paused) { delay(2800); controlsVisible = false }
+        }
         val transitionMs = when (transitionStyle) { "cut" -> 0; "crossfade" -> 1100; else -> 1800 }
         AnimatedContent(targetState = model, transitionSpec = {
             when (transitionStyle) {
@@ -956,7 +1042,7 @@ private fun PlaybackView(
                 model = photo,
                 contentDescription = "Slideshow Foto",
                 onSuccess = { state -> sourceLandscape = state.result.drawable.intrinsicWidth > state.result.drawable.intrinsicHeight },
-                modifier = Modifier.fillMaxSize().then(if (panEnabled) Modifier.clipToBounds() else Modifier.padding(18.dp))
+                modifier = Modifier.fillMaxSize().then(if (panEnabled) Modifier.clipToBounds() else Modifier.padding(imagePaddingDp.dp))
                     .graphicsLayer {
                         if (panEnabled) {
                             scaleX = 1.08f
@@ -1023,7 +1109,7 @@ private fun PlaybackView(
                     }
                 }
             }
-        } else {
+        } else if (controlsVisible) {
             Row(Modifier.align(Alignment.BottomCenter).padding(bottom = 24.dp).clip(RoundedCornerShape(24.dp)).background(Color(0x990E1116)).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onPrevious) { Icon(Icons.Default.SkipPrevious, "Vorheriges Bild", tint = Color.White) }
                 IconButton(onClick = onPause) { Icon(Icons.Default.Pause, "Pause", tint = Accent) }
@@ -1048,10 +1134,13 @@ private fun TimeWeatherOverlay(showClock: Boolean, showDate: Boolean, showWeathe
             .background(Brush.linearGradient(listOf(Color(0x99FFFFFF), Color(0x553D536A), Color(0xAA141B25))))
             .border(1.dp, Brush.linearGradient(listOf(Color(0xCCFFFFFF), Color(0x3383D8FF), Color(0x66FFFFFF))), shape)
         else Modifier.clip(RoundedCornerShape(14.dp)).background(Color(0x990E1116))
-        Column(Modifier.align(Alignment.TopEnd).padding(24.dp).then(glassModifier).padding(horizontal = if (glassOverlay) 18.dp else 12.dp, vertical = if (glassOverlay) 12.dp else 8.dp), horizontalAlignment = Alignment.End) {
-            if (showClock) Text(time, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Medium)
-            if (showDate) Text(date, color = Color(0xFFE1E5EA), fontSize = 12.sp)
-            if (showWeather && weatherLabel.isNotBlank()) Text(weatherLabel, color = Color(0xFFE1E5EA), fontSize = 12.sp)
+        Row(Modifier.fillMaxWidth().padding(24.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
+            if (showClock) Text(time, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Medium,
+                modifier = Modifier.then(glassModifier).padding(horizontal = if (glassOverlay) 18.dp else 12.dp, vertical = if (glassOverlay) 12.dp else 8.dp))
+            Column(Modifier.then(glassModifier).padding(horizontal = if (glassOverlay) 18.dp else 12.dp, vertical = if (glassOverlay) 12.dp else 8.dp), horizontalAlignment = Alignment.End) {
+                if (showDate) Text(date, color = Color(0xFFE1E5EA), fontSize = 12.sp)
+                if (showWeather && weatherLabel.isNotBlank()) Text(weatherLabel, color = Color(0xFFE1E5EA), fontSize = 12.sp)
+            }
         }
     }
 }
@@ -1112,6 +1201,7 @@ private fun SettingsDialog(
     transitionStyle: String,
     imageScaleMode: String,
     glassOverlay: Boolean,
+    imagePaddingDp: Int,
     scheduleEnabled: Boolean,
     scheduleWeekdaysOnly: Boolean,
     scheduleStart: String,
@@ -1126,6 +1216,7 @@ private fun SettingsDialog(
     onWeatherPostal: (String) -> Unit,
     onTransitionStyle: (String) -> Unit,
     onImageScaleMode: (String) -> Unit,
+    onImagePadding: (Int) -> Unit,
     onScheduleEnabled: (Boolean) -> Unit,
     onScheduleDays: (Boolean) -> Unit,
     onScheduleStart: (String) -> Unit,
@@ -1274,6 +1365,10 @@ private fun SettingsDialog(
                     OutlinedTextField(value = scheduleEnd, onValueChange = { value -> if (value.length <= 5 && value.all { it.isDigit() || it == ':' }) onScheduleEnd(value) }, label = { Text("Bis · HH:MM") }, singleLine = true,
                         modifier = Modifier.weight(1f).focusRequester(scheduleEndFocus).onFocusChanged { if (it.isFocused) onFocusedNode(15) }.then(if (focusedSettingsNode == 15) Modifier.border(3.dp, RemoteFocus, RoundedCornerShape(12.dp)) else Modifier))
                 }
+                Text("Bildrand · ${imagePaddingDp} dp", color = Color.White, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(if (focusedSettingsNode == 17) RemoteFocusSurface else Color.Transparent)
+                        .clickable { onImagePadding(cycleValue(imagePaddingDp, listOf(0, 4, 8, 12, 16, 24, 32), 1)) }.padding(12.dp))
+                Text("Links/rechts ändert den Abstand zum Bildrand.", color = Color(0xFFB8C1CC), fontSize = 12.sp)
             }
         }
     }
