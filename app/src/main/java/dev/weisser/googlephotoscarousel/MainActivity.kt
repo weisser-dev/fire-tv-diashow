@@ -74,6 +74,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.first
 import java.io.File
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -180,6 +182,7 @@ class MainActivity : ComponentActivity() {
             var motionSeconds by remember { mutableIntStateOf(prefs.getInt("motion_seconds", 30)) }
             var shuffle by remember { mutableStateOf(prefs.getBoolean("shuffle", false)) }
             var photoHistory by remember { mutableStateOf(loadPhotoHistory(prefs.getString("photo_history", null))) }
+            var loadedNextPhoto by remember { mutableStateOf<String?>(null) }
             var displayRotation by remember { mutableIntStateOf(prefs.getInt("display_rotation", 0)) }
             var orientationChosen by remember { mutableStateOf(prefs.contains("display_rotation")) }
             var panZoom by remember { mutableStateOf(prefs.getBoolean("pan_zoom", true)) }
@@ -258,6 +261,11 @@ class MainActivity : ComponentActivity() {
                 if (selectedUploadAlbum != "*") selectedUploads.map { "file:${it.path}" }
                 else (localPhotos.map { "uri:$it" } + selectedUploads.map { "file:${it.path}" }).distinct()
             }
+            val nextSlideIndex = remember(images, index, shuffle) {
+                if (images.size <= 1) index else if (shuffle) chooseLeastViewedImage(images, photoHistory, index) else (index + 1) % images.size
+            }
+            val nextSlideImageModel = images.getOrNull(nextSlideIndex)?.removePrefix("uri:")?.removePrefix("file:")
+            LaunchedEffect(index, nextSlideIndex) { loadedNextPhoto = null }
             val managerImages = remember(localPhotos, uploadedPhotos, managerAlbumFilter) {
                 val local = if (managerAlbumFilter == "*" || managerAlbumFilter == "__local__") localPhotos.map { "uri:$it" } else emptyList()
                 val uploads = uploadedPhotos.filter { managerAlbumFilter == "*" || it.album == managerAlbumFilter }.map { "file:${it.path}" }
@@ -640,13 +648,16 @@ class MainActivity : ComponentActivity() {
                     }
                     onDispose { remoteKeyHandler = null }
                 }
-                LaunchedEffect(images.size, index, playing, paused, seconds, shuffle, panZoom, currentImageNeedsMotion, motionSeconds) {
+                LaunchedEffect(images.size, index, nextSlideIndex, playing, paused, seconds, shuffle, panZoom, currentImageNeedsMotion, motionSeconds) {
                     if (playing && !paused && images.size > 1) {
                         val slideSeconds = if (panZoom && currentImageNeedsMotion) maxOf(seconds, motionSeconds) else seconds
                         delay(slideSeconds * 1000L)
-                        index = if (shuffle) {
-                            chooseLeastViewedImage(images, photoHistory, index)
-                        } else (index + 1) % images.size
+                        nextSlideImageModel?.let { targetModel ->
+                            withTimeoutOrNull(5_000L) {
+                                snapshotFlow { loadedNextPhoto }.first { it == targetModel }
+                            }
+                        }
+                        index = nextSlideIndex
                     }
                 }
                 LaunchedEffect(playing, paused, sleeping, sleepTimerMinutes, sleepDeadline) {
@@ -714,8 +725,9 @@ class MainActivity : ComponentActivity() {
                     if (sleeping) {
                         SleepScreen(showClock, showDate, weatherEnabled, weatherLabel, glassOverlay)
                     } else if (playing && images.isNotEmpty()) {
-                        PlaybackView(images, index, panZoom, seconds, motionSeconds, playing, paused, imageScaleMode, imagePaddingDp, playbackControlsPulse, transitionStyle, pauseMenuIndex, shuffle, sleepTimerMinutes,
+                        PlaybackView(images, index, nextSlideIndex, panZoom, seconds, motionSeconds, playing, paused, imageScaleMode, imagePaddingDp, playbackControlsPulse, transitionStyle, pauseMenuIndex, shuffle, sleepTimerMinutes,
                             showClock, showDate, weatherEnabled, weatherLabel, glassOverlay,
+                            onNextPreloaded = { loadedNextPhoto = it },
                             onImageMotionRequired = { currentImageNeedsMotion = it },
                             onPause = { paused = true; pauseMenuIndex = 0 },
                             onNext = { index = (index + 1) % images.size }, onPrevious = { index = (index - 1 + images.size) % images.size },
@@ -1151,9 +1163,10 @@ private fun EmptyState() {
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
 private fun PlaybackView(
-    images: List<String>, index: Int, panZoom: Boolean, seconds: Int, motionSeconds: Int, playing: Boolean,
+    images: List<String>, index: Int, nextIndex: Int, panZoom: Boolean, seconds: Int, motionSeconds: Int, playing: Boolean,
     paused: Boolean, imageScaleMode: String, imagePaddingDp: Int, controlsPulse: Int, transitionStyle: String, pauseMenuIndex: Int, shuffle: Boolean, sleepTimerMinutes: Int,
     showClock: Boolean, showDate: Boolean, showWeather: Boolean, weatherLabel: String, glassOverlay: Boolean,
+    onNextPreloaded: (String) -> Unit,
     onImageMotionRequired: (Boolean) -> Unit,
     onPause: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onResume: () -> Unit,
     onAddImages: () -> Unit, onAddFiles: () -> Unit, onCycleSpeed: (Int) -> Unit, onCycleMotionDuration: (Int) -> Unit,
@@ -1162,18 +1175,45 @@ private fun PlaybackView(
 ) {
     BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
         val model = images[index].removePrefix("uri:").removePrefix("file:")
+        val nextModel = images.getOrNull(nextIndex)?.removePrefix("uri:")?.removePrefix("file:")
         val density = LocalDensity.current
+        val transitionMs = transitionDurationMillis(transitionStyle)
         var controlsVisible by remember { mutableStateOf(true) }
+        var lastTransitionModel by remember { mutableStateOf(model) }
+        var transitionInFlight by remember { mutableStateOf(false) }
+        LaunchedEffect(model, transitionStyle) {
+            if (lastTransitionModel != model) {
+                transitionInFlight = true
+                delay(transitionMs.toLong())
+                transitionInFlight = false
+            }
+            lastTransitionModel = model
+        }
         LaunchedEffect(paused, controlsPulse) {
             controlsVisible = true
             if (!paused) { delay(2800); controlsVisible = false }
         }
-        val transitionMs = when (transitionStyle) { "cut" -> 0; "crossfade" -> 800; else -> 650 }
+        // Keep exactly the current and next photo warm. Remove the preload during a dissolve
+        // so an older Fire TV never has three full-screen decodes in memory at once.
+        if (playing && !paused && !transitionInFlight && nextModel != null && nextModel != model) {
+            AsyncImage(
+                model = nextModel,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize().padding(imagePaddingDp.dp).clipToBounds().graphicsLayer { alpha = 0f },
+                onSuccess = { onNextPreloaded(nextModel) },
+                onError = { onNextPreloaded(nextModel) },
+                contentScale = when (imageScaleMode) {
+                    "fill" -> ContentScale.Crop
+                    "stretch" -> ContentScale.FillBounds
+                    else -> ContentScale.Fit
+                }
+            )
+        }
         AnimatedContent(targetState = model, modifier = Modifier.fillMaxSize(), transitionSpec = {
             when (transitionStyle) {
                 "cut" -> androidx.compose.animation.EnterTransition.None togetherWith androidx.compose.animation.ExitTransition.None
-                "slide" -> (slideInHorizontally(tween(700)) { it / 24 } + fadeIn(tween(700))) togetherWith (slideOutHorizontally(tween(700)) { -it / 24 } + fadeOut(tween(700)))
-                "zoom" -> (scaleIn(tween(700), initialScale = 0.99f) + fadeIn(tween(700))) togetherWith fadeOut(tween(700))
+                "slide" -> (slideInHorizontally(tween(1200)) { it / 30 } + fadeIn(tween(1200))) togetherWith (slideOutHorizontally(tween(1200)) { -it / 30 } + fadeOut(tween(1200)))
+                "zoom" -> (scaleIn(tween(1100), initialScale = 0.995f) + fadeIn(tween(1100))) togetherWith fadeOut(tween(1100))
                 else -> fadeIn(tween(transitionMs)) togetherWith fadeOut(tween(transitionMs))
             }
         }, label = "photo-transition") { photo ->
@@ -1384,6 +1424,7 @@ private fun cycleValue(current: Int, choices: List<Int>, direction: Int): Int {
 }
 
 private fun transitionName(style: String) = when (style) { "cut" -> "Direkt"; "crossfade" -> "Sanfte Überblendung"; "slide" -> "Gleiten"; "zoom" -> "Sanfter Zoom"; else -> "Langsame Überblendung" }
+private fun transitionDurationMillis(style: String) = when (style) { "cut" -> 0; "crossfade" -> 1600; "slide" -> 1200; "zoom" -> 1100; else -> 1400 }
 private fun imageScaleName(mode: String) = when (mode) { "fill" -> "Füllen"; "stretch" -> "Strecken"; "ken_burns" -> "Zoom & Schwenk"; else -> "Einpassen" }
 private fun selectedAlbumLabel(images: List<String>, index: Int) = images.getOrNull(index)?.contains("upload-albums") == true
 
