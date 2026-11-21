@@ -1483,7 +1483,7 @@ private fun TimeWeatherOverlay(showClock: Boolean, showDate: Boolean, showWeathe
         }
         if (calendarEvents.isNotEmpty()) {
             val inset = (imagePaddingDp + 42).dp
-            CalendarAgenda(calendarEvents, glassOverlay, Modifier.align(Alignment.BottomStart).padding(start = inset, bottom = (imagePaddingDp + 20).dp).widthIn(max = ((maxWidth - inset * 2) / 2).coerceAtLeast(120.dp)))
+            CalendarAgenda(calendarEvents, glassOverlay, Modifier.align(Alignment.BottomStart).padding(start = inset, bottom = (imagePaddingDp + 40).dp).widthIn(max = ((maxWidth - inset * 2) / 2).coerceAtLeast(120.dp)))
         }
         if (noteText.isNotBlank()) NoteCard(noteText, glassOverlay, Modifier.align(Alignment.BottomStart).padding((imagePaddingDp + 20).dp))
     }
@@ -1537,7 +1537,7 @@ private fun CalendarAgenda(events: List<CalendarEvent>, glass: Boolean, modifier
     val shape = RoundedCornerShape(16.dp)
     val background = when {
         dimmed -> Modifier.clip(shape).background(Color(0x4420262D)).border(1.dp, Color(0x44565F69), shape)
-        glass -> Modifier.clip(shape).background(Brush.linearGradient(listOf(Color(0x55FFFFFF), Color(0x443D536A), Color(0xAA141B25)))).border(1.dp, Color(0x66FFFFFF), shape)
+        glass -> Modifier.clip(shape).background(Brush.linearGradient(listOf(Color(0x22FFFFFF), Color(0x33404D5A), Color(0xCC101820)))).border(1.dp, Color(0x448E9AAA), shape)
         else -> Modifier.clip(shape).background(Color(0xAA0E1116))
     }
     val headingColor = if (dimmed) Color(0xFF747C85) else Color(0xFFE8C98C)

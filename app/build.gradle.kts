@@ -18,8 +18,8 @@ android {
         applicationId = "dev.weisser.googlephotoscarousel"
         minSdk = 22
         targetSdk = 35
-        versionCode = 32
-        versionName = "0.11.12"
+        versionCode = 33
+        versionName = "0.11.13"
     }
 
     val releaseStoreFile = providers.gradleProperty("releaseStoreFile").orNull
