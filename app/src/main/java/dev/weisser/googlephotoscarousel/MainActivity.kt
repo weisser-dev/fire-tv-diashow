@@ -178,11 +178,13 @@ class MainActivity : ComponentActivity() {
         setContent {
             val prefs = remember { getSharedPreferences("carousel", MODE_PRIVATE) }
             val localPhotos = localPhotoUris
-            var seconds by remember { mutableIntStateOf(prefs.getInt("seconds", 8)) }
+            var seconds by remember { mutableIntStateOf(prefs.getInt("seconds", 8).coerceIn(5, 60)) }
             var motionSeconds by remember { mutableIntStateOf(prefs.getInt("motion_seconds", 30)) }
             var shuffle by remember { mutableStateOf(prefs.getBoolean("shuffle", false)) }
             var photoHistory by remember { mutableStateOf(loadPhotoHistory(prefs.getString("photo_history", null))) }
+            var lastRecordedSlide by remember { mutableStateOf<String?>(null) }
             var loadedNextPhoto by remember { mutableStateOf<String?>(null) }
+            var failedPreloadPhotos by remember { mutableStateOf<Set<String>>(emptySet()) }
             var displayRotation by remember { mutableIntStateOf(prefs.getInt("display_rotation", 0)) }
             var orientationChosen by remember { mutableStateOf(prefs.contains("display_rotation")) }
             var panZoom by remember { mutableStateOf(prefs.getBoolean("pan_zoom", true)) }
@@ -261,8 +263,8 @@ class MainActivity : ComponentActivity() {
                 if (selectedUploadAlbum != "*") selectedUploads.map { "file:${it.path}" }
                 else (localPhotos.map { "uri:$it" } + selectedUploads.map { "file:${it.path}" }).distinct()
             }
-            val nextSlideIndex = remember(images, index, shuffle) {
-                if (images.size <= 1) index else if (shuffle) chooseLeastViewedImage(images, photoHistory, index) else (index + 1) % images.size
+            val nextSlideIndex = remember(images, index, shuffle, photoHistory, failedPreloadPhotos) {
+                chooseNextImage(images, photoHistory, index, shuffle, failedPreloadPhotos)
             }
             val nextSlideImageModel = images.getOrNull(nextSlideIndex)?.removePrefix("uri:")?.removePrefix("file:")
             LaunchedEffect(index, nextSlideIndex) { loadedNextPhoto = null }
@@ -300,8 +302,11 @@ class MainActivity : ComponentActivity() {
                 val now = System.currentTimeMillis()
                 images.forEach { if (!updated.containsKey(it)) updated[it] = PhotoHistory(now, 0, 0L) }
                 if (playing) images.getOrNull(index)?.let { model ->
+                    val slideKey = "$index:$model"
+                    if (lastRecordedSlide == slideKey) return@let
                     val old = updated[model] ?: PhotoHistory(now, 0, 0L)
                     updated[model] = old.copy(viewCount = old.viewCount + 1, lastViewedAt = now)
+                    lastRecordedSlide = slideKey
                 }
                 if (updated != photoHistory) {
                     photoHistory = updated
@@ -477,7 +482,7 @@ class MainActivity : ComponentActivity() {
                                     if (focusedSettingsNode == 2) { imagePaddingDp = cycleValue(imagePaddingDp, listOf(0, 4, 8, 12, 16, 24, 32), -1); prefs.edit().putInt("image_padding_dp", imagePaddingDp).apply(); return@settingsKeys true }
                                     when (focusedSettingsNode) {
                                         1 -> focusedSettingsNode = 0
-                                        4 -> seconds = (seconds - 1).coerceAtLeast(3)
+                                        4 -> seconds = (seconds - 1).coerceAtLeast(5)
                                         5 -> autoStartOnBoot = !autoStartOnBoot
                                         11 -> transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut", "slide", "zoom"), -1)
                                         12 -> imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch", "ken_burns"), -1)
@@ -505,7 +510,7 @@ class MainActivity : ComponentActivity() {
                                         1 -> { prefs.edit().putInt("display_rotation", displayRotation).apply(); showSettings = false }
                                         2 -> { imagePaddingDp = cycleValue(imagePaddingDp, listOf(0, 4, 8, 12, 16, 24, 32), 1); prefs.edit().putInt("image_padding_dp", imagePaddingDp).apply() }
                                         3 -> { panZoom = !panZoom; prefs.edit().putBoolean("pan_zoom", panZoom).apply() }
-                                        4 -> { seconds = if (seconds >= 60) 3 else seconds + 1; prefs.edit().putInt("seconds", seconds).apply() }
+                                        4 -> { seconds = if (seconds >= 60) 5 else seconds + 1; prefs.edit().putInt("seconds", seconds).apply() }
                                         5 -> { autoStartOnBoot = !autoStartOnBoot; prefs.edit().putBoolean("auto_start_on_boot", autoStartOnBoot).apply() }
                                         6 -> { showClock = !showClock; prefs.edit().putBoolean("show_clock", showClock).apply() }
                                         7 -> { showDate = !showDate; prefs.edit().putBoolean("show_date", showDate).apply() }
@@ -596,7 +601,7 @@ class MainActivity : ComponentActivity() {
                                     val direction = if (code == KeyEvent.KEYCODE_DPAD_RIGHT) 1 else -1
                                     when (pauseMenuIndex) {
                                         1 -> { shuffle = !shuffle; prefs.edit().putBoolean("shuffle", shuffle).apply() }
-                                        4 -> { seconds = (seconds + direction).coerceIn(3, 60); prefs.edit().putInt("seconds", seconds).apply() }
+                                        4 -> { seconds = (seconds + direction).coerceIn(5, 60); prefs.edit().putInt("seconds", seconds).apply() }
                                         5 -> { motionSeconds = cycleValue(motionSeconds, listOf(15, 30, 45, 60), direction); prefs.edit().putInt("motion_seconds", motionSeconds).apply() }
                                         6 -> { transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut", "slide", "zoom"), direction); prefs.edit().putString("transition_style", transitionStyle).apply() }
                                         7 -> { imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch", "ken_burns"), direction); prefs.edit().putString("image_scale_mode", imageScaleMode).apply() }
@@ -611,7 +616,7 @@ class MainActivity : ComponentActivity() {
                                         1 -> { shuffle = !shuffle; prefs.edit().putBoolean("shuffle", shuffle).apply() }
                                         2 -> startPhotoUpload()
                                         3 -> launchPhotoChooser()
-                                        4 -> seconds = if (seconds >= 60) 3 else seconds + 1
+                                        4 -> seconds = if (seconds >= 60) 5 else seconds + 1
                                         5 -> { motionSeconds = cycleValue(motionSeconds, listOf(15, 30, 45, 60), 1); prefs.edit().putInt("motion_seconds", motionSeconds).apply() }
                                         6 -> transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut", "slide", "zoom"), 1)
                                         7 -> imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch", "ken_burns"), 1)
@@ -629,7 +634,7 @@ class MainActivity : ComponentActivity() {
                         playing && images.isNotEmpty() -> { code ->
                             when {
                                 (portraitUi && code == KeyEvent.KEYCODE_DPAD_DOWN) || (!portraitUi && code == KeyEvent.KEYCODE_DPAD_RIGHT) || code == KeyEvent.KEYCODE_MEDIA_NEXT -> {
-                                    index = (index + 1) % images.size
+                                    index = nextSlideIndex
                                     true
                                 }
                                 (portraitUi && code == KeyEvent.KEYCODE_DPAD_UP) || (!portraitUi && code == KeyEvent.KEYCODE_DPAD_LEFT) || code == KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
@@ -648,14 +653,20 @@ class MainActivity : ComponentActivity() {
                     }
                     onDispose { remoteKeyHandler = null }
                 }
-                LaunchedEffect(images.size, index, nextSlideIndex, playing, paused, seconds, shuffle, panZoom, currentImageNeedsMotion, motionSeconds) {
+                LaunchedEffect(images.size, index, nextSlideIndex, playing, paused, seconds, shuffle, panZoom, currentImageNeedsMotion, motionSeconds, loadedNextPhoto) {
                     if (playing && !paused && images.size > 1) {
-                        val slideSeconds = if (panZoom && currentImageNeedsMotion) maxOf(seconds, motionSeconds) else seconds
+                        val slideSeconds = if (panZoom && currentImageNeedsMotion) maxOf(seconds, motionSeconds, 5) else maxOf(seconds, 5)
                         delay(slideSeconds * 1000L)
-                        nextSlideImageModel?.let { targetModel ->
-                            withTimeoutOrNull(5_000L) {
+                        val targetModel = nextSlideImageModel
+                        if (targetModel != null && targetModel != images[index].removePrefix("uri:").removePrefix("file:")) {
+                            val ready = withTimeoutOrNull(5_000L) {
                                 snapshotFlow { loadedNextPhoto }.first { it == targetModel }
-                            }
+                                true
+                            } ?: false
+                            // If decoding failed or timed out, keep the current image visible as
+                            // the fallback. The failed item is excluded and the next candidate
+                            // is preloaded before the current slide is allowed to advance.
+                            if (!ready) return@LaunchedEffect
                         }
                         index = nextSlideIndex
                     }
@@ -728,11 +739,12 @@ class MainActivity : ComponentActivity() {
                         PlaybackView(images, index, nextSlideIndex, panZoom, seconds, motionSeconds, playing, paused, imageScaleMode, imagePaddingDp, playbackControlsPulse, transitionStyle, pauseMenuIndex, shuffle, sleepTimerMinutes,
                             showClock, showDate, weatherEnabled, weatherLabel, glassOverlay,
                             onNextPreloaded = { loadedNextPhoto = it },
+                            onNextPreloadFailed = { failedPreloadPhotos = failedPreloadPhotos + it },
                             onImageMotionRequired = { currentImageNeedsMotion = it },
                             onPause = { paused = true; pauseMenuIndex = 0 },
-                            onNext = { index = (index + 1) % images.size }, onPrevious = { index = (index - 1 + images.size) % images.size },
+                            onNext = { index = nextSlideIndex }, onPrevious = { index = (index - 1 + images.size) % images.size },
                             onResume = { paused = false }, onAddImages = { startPhotoUpload() }, onAddFiles = { launchPhotoChooser() },
-                            onCycleSpeed = { direction -> seconds = (seconds + direction).coerceIn(3, 60); prefs.edit().putInt("seconds", seconds).apply() },
+                            onCycleSpeed = { direction -> seconds = (seconds + direction).coerceIn(5, 60); prefs.edit().putInt("seconds", seconds).apply() },
                             onCycleMotionDuration = { direction -> motionSeconds = cycleValue(motionSeconds, listOf(15, 30, 45, 60), direction); prefs.edit().putInt("motion_seconds", motionSeconds).apply() },
                             onCycleTransition = { direction -> transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut", "slide", "zoom"), direction); prefs.edit().putString("transition_style", transitionStyle).apply() },
                             onCycleScale = { direction -> imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch", "ken_burns"), direction); prefs.edit().putString("image_scale_mode", imageScaleMode).apply() },
@@ -867,7 +879,7 @@ class MainActivity : ComponentActivity() {
                                     IconButton(onClick = { shuffle = !shuffle; prefs.edit().putBoolean("shuffle", shuffle).apply() }) { Icon(Icons.Default.Shuffle, "Zufall", tint = if (shuffle) Accent else Color.Gray) }
                                     Text(if (shuffle) "Shuffle an" else "Shuffle aus", color = Color(0xFFC1C8D2), fontSize = 13.sp)
                                 }
-                                Slider(value = seconds.toFloat(), onValueChange = { seconds = it.toInt().coerceIn(3, 60); prefs.edit().putInt("seconds", seconds).apply() }, valueRange = 3f..60f, colors = SliderDefaults.colors(thumbColor = Accent, activeTrackColor = Accent))
+                                Slider(value = seconds.toFloat(), onValueChange = { seconds = it.toInt().coerceIn(5, 60); prefs.edit().putInt("seconds", seconds).apply() }, valueRange = 5f..60f, colors = SliderDefaults.colors(thumbColor = Accent, activeTrackColor = Accent))
                             }
                             Spacer(Modifier.height(16.dp))
                             Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
@@ -1166,7 +1178,7 @@ private fun PlaybackView(
     images: List<String>, index: Int, nextIndex: Int, panZoom: Boolean, seconds: Int, motionSeconds: Int, playing: Boolean,
     paused: Boolean, imageScaleMode: String, imagePaddingDp: Int, controlsPulse: Int, transitionStyle: String, pauseMenuIndex: Int, shuffle: Boolean, sleepTimerMinutes: Int,
     showClock: Boolean, showDate: Boolean, showWeather: Boolean, weatherLabel: String, glassOverlay: Boolean,
-    onNextPreloaded: (String) -> Unit,
+    onNextPreloaded: (String) -> Unit, onNextPreloadFailed: (String) -> Unit,
     onImageMotionRequired: (Boolean) -> Unit,
     onPause: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onResume: () -> Unit,
     onAddImages: () -> Unit, onAddFiles: () -> Unit, onCycleSpeed: (Int) -> Unit, onCycleMotionDuration: (Int) -> Unit,
@@ -1201,7 +1213,7 @@ private fun PlaybackView(
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize().padding(imagePaddingDp.dp).clipToBounds().graphicsLayer { alpha = 0f },
                 onSuccess = { onNextPreloaded(nextModel) },
-                onError = { onNextPreloaded(nextModel) },
+                onError = { onNextPreloadFailed(nextModel) },
                 contentScale = when (imageScaleMode) {
                     "fill" -> ContentScale.Crop
                     "stretch" -> ContentScale.FillBounds
@@ -1370,8 +1382,8 @@ private fun PlaybackView(
 private fun TimeWeatherOverlay(showClock: Boolean, showDate: Boolean, showWeather: Boolean, weatherLabel: String, glassOverlay: Boolean, imagePaddingDp: Int) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { delay(15_000); now = System.currentTimeMillis() } }
-    val date = remember(now) { java.text.SimpleDateFormat("EEEE, d. MMMM", java.util.Locale.GERMANY).format(java.util.Date(now)) }
-    val time = remember(now) { java.text.SimpleDateFormat("HH:mm", java.util.Locale.GERMANY).format(java.util.Date(now)) }
+    val date = remember(now) { java.text.SimpleDateFormat("EEEE, d. MMMM", java.util.Locale.getDefault()).format(java.util.Date(now)) }
+    val time = remember(now) { java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(now)) }
     Box(Modifier.fillMaxSize()) {
         val shape = RoundedCornerShape(18.dp)
         // Keep the glass treatment to one quiet outline; stacked gradients looked like a second bar on TV.
@@ -1395,8 +1407,8 @@ private fun TimeWeatherOverlay(showClock: Boolean, showDate: Boolean, showWeathe
 private fun SleepScreen(showClock: Boolean, showDate: Boolean, showWeather: Boolean, weatherLabel: String, glassOverlay: Boolean) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { delay(15_000); now = System.currentTimeMillis() } }
-    val date = remember(now) { java.text.SimpleDateFormat("EEEE, d. MMMM", java.util.Locale.GERMANY).format(java.util.Date(now)) }
-    val time = remember(now) { java.text.SimpleDateFormat("HH:mm", java.util.Locale.GERMANY).format(java.util.Date(now)) }
+    val date = remember(now) { java.text.SimpleDateFormat("EEEE, d. MMMM", java.util.Locale.getDefault()).format(java.util.Date(now)) }
+    val time = remember(now) { java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(now)) }
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         if (showClock || showDate || showWeather && weatherLabel.isNotBlank()) {
             // Sleep mode stays visually dark; don't draw the glass outline or its blue highlight.
@@ -1444,11 +1456,32 @@ private fun savePhotoHistory(history: Map<String, PhotoHistory>): String = JSONO
     history.forEach { (key, value) -> put(key, JSONObject().put("addedAt", value.addedAt).put("viewCount", value.viewCount).put("lastViewedAt", value.lastViewedAt)) }
 }.toString()
 
-private fun chooseLeastViewedImage(images: List<String>, history: Map<String, PhotoHistory>, currentIndex: Int): Int {
-    if (images.size <= 1) return 0
-    val candidates = images.indices.filter { it != currentIndex }
-    val leastViews = candidates.minOfOrNull { history[images[it]]?.viewCount ?: 0 } ?: 0
-    return candidates.filter { (history[images[it]]?.viewCount ?: 0) == leastViews }.random()
+private fun chooseNextImage(
+    images: List<String>, history: Map<String, PhotoHistory>, currentIndex: Int, shuffle: Boolean, failed: Set<String>
+): Int {
+    if (images.size <= 1) return currentIndex
+    val usable = images.indices.filter { it != currentIndex && images[it].removePrefix("uri:").removePrefix("file:") !in failed }
+    if (usable.isEmpty()) return currentIndex
+    if (!shuffle) {
+        for (step in 1 until images.size) {
+            val candidate = (currentIndex + step) % images.size
+            if (candidate in usable) return candidate
+        }
+        return currentIndex
+    }
+    return chooseWeightedUnderseen(images, history, usable)
+}
+
+private fun chooseWeightedUnderseen(images: List<String>, history: Map<String, PhotoHistory>, candidates: List<Int>): Int {
+    if (candidates.isEmpty()) return 0
+    val minimum = candidates.minOf { history[images[it]]?.viewCount ?: 0 }
+    // Permit a view-count spread of three while strongly favoring unseen photos.
+    val eligible = candidates.filter { (history[images[it]]?.viewCount ?: 0) <= minimum + 3 }
+    val weighted = eligible.flatMap { index ->
+        val count = history[images[index]]?.viewCount ?: 0
+        List((4 - (count - minimum)).coerceAtLeast(1)) { index }
+    }
+    return weighted.random()
 }
 
 @Composable
@@ -1581,8 +1614,8 @@ private fun SettingsDialog(
                 Text("Bilddauer · ${seconds}s", fontWeight = FontWeight.SemiBold)
                 Slider(
                     value = seconds.toFloat(),
-                    onValueChange = { onSeconds(it.toInt().coerceIn(3, 60)) },
-                    valueRange = 3f..60f,
+                    onValueChange = { onSeconds(it.toInt().coerceIn(5, 60)) },
+                    valueRange = 5f..60f,
                     modifier = Modifier.focusProperties { canFocus = false }
                         .then(if (focusedSettingsNode == 4) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(12.dp)) else Modifier)
                 )
@@ -1729,7 +1762,8 @@ private fun fetchWeather(country: String, postal: String): String? = runCatching
     val client = OkHttpClient.Builder().callTimeout(12, TimeUnit.SECONDS).build()
     val encodedPostal = URLEncoder.encode(postal.trim(), "UTF-8")
     val encodedCountry = URLEncoder.encode(country.trim().uppercase(), "UTF-8")
-    val geocodeUrl = "https://geocoding-api.open-meteo.com/v1/search?name=$encodedPostal&count=10&language=de&format=json&countryCode=$encodedCountry"
+    val language = java.util.Locale.getDefault().language.ifBlank { "en" }
+    val geocodeUrl = "https://geocoding-api.open-meteo.com/v1/search?name=$encodedPostal&count=10&language=$language&format=json&countryCode=$encodedCountry"
     var placeName: String? = null
     var latitude = Double.NaN
     var longitude = Double.NaN
