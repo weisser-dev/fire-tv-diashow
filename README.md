@@ -1,52 +1,47 @@
-# Photo Carousel
+# Fire TV Diashow
 
-Eine Android-App für eine dauerhaft laufende Fotoshow auf Android TV und Fire TV. Sie ist für Fernseher gedacht, auf denen Familienbilder stundenlang sichtbar bleiben sollen, ohne Dateien vorab passend drehen zu müssen.
+Eine leichte Diashow für Android TV und Fire TV. Sie ist für Fernseher gedacht, auf denen Familienbilder stundenlang sichtbar bleiben sollen – auch im Hochformat, ohne Fotos vorher drehen zu müssen.
 
 ## Funktionen
 
-- **Lokale Bilder:** Mehrere Bilder aus dem Dateiauswahldialog wählen; Auswahl und Leseberechtigungen bleiben auf dem Gerät gespeichert.
-- **Google Fotos:** Anmeldung im Silk-/Systembrowser des Fire TV, danach Fotos im Google-Photos-Picker auswählen. Die Bilder werden heruntergeladen und im privaten App-Speicher zwischengespeichert.
-- **Diashow:** Shuffle, Bilddauer von 3 bis 60 Sekunden, nächste/zurück-Steuerung, weiche Übergänge und optionaler langsamer Schwenk mit Zoom.
-- **TV-Betrieb:** Bildschirm bleibt während der Wiedergabe aktiv; Vollbilddarstellung und Steuerung über Fernbedienung.
-- **Displayausrichtung:** Beim ersten Start Quer- oder Hochformat wählen. Die gesamte Oberfläche einschließlich Einstellungen und QR-Auswahl wird gedreht; die Richtungstasten der Fernbedienung werden passend dazu umgelegt.
-- **App-Symbol:** Eigenes Foto-Rahmen-Symbol im Launcher.
-- **Ältere Fire TVs:** Mindestversion Android API 22 (Fire OS 5); Releases enthalten zusätzlich die klassische APK-Signatur für ältere Android-Versionen.
-- **Updates in der App:** Beim Start wird GitHub nach einem neueren stabilen Release gefragt. Die App kann dessen APK herunterladen, Paket und Versionsnummer prüfen und den Android-Installationsdialog öffnen.
-- **Ausrichtung:** Die gesamte App auf 0°, 90°, 180° oder 270° drehen. Menü, Bildanzeige und Fernbedienungsrichtungen folgen derselben Ausrichtung.
-- **Browser-Demo:** [Interaktive Vorschau](https://weisser-dev.github.io/google-photos-carousel/) mit Landscape/Portrait, Übergängen, Dauer und Bildfüllung.
+- **Dateien:** Bilder über den Dateiauswahldialog hinzufügen und einzeln aus der Vorschau löschen.
+- **Handy-Upload:** QR-Code im selben WLAN öffnen, Bilder auswählen und in Alben auf dem Fernseher sortieren. Uploads bleiben lokal im privaten App-Speicher.
+- **Diashow:** Zufallswiedergabe, Bilddauer, Vor-/Zurück, Einpassen/Füllen/Strecken und fünf Übergänge: langsame Überblendung, weiche Überblendung, direkt, Gleiten und Zoom.
+- **Fernbedienung:** Mittlere Taste pausiert; das Kontextmenü verwaltet Bilder, Dauer, Übergang, Bilddarstellung, Alben und Schlaf-Timer. „Jetzt schlafen“ schaltet die Fotos aus; OK oder Zurück weckt die App wieder auf. Ein Wochenplan startet die Wiedergabe zum Beispiel Mo–Fr von 16:00 bis 21:00 Uhr und zeigt außerhalb dieser Zeit den Schlafbildschirm.
+- **Uhr und Wetter:** Im Schlafmodus optional Uhr, Datum und aktuelle Wetterdaten einblenden. Wetter-Ort über Land (ISO-Code) und Postleitzahl angeben, etwa `DE` und `10115`. Die Wetteranzeige nutzt öffentliche Daten von Open-Meteo. Zeitplan und Schlaf-Timer steuern den App-Bildschirm, sie wecken den Fire TV nicht aus einem ausgeschalteten oder tief schlafenden Systemzustand.
+- **Ausrichtung:** Die App, Menüs und Fernbedienungsnavigation lassen sich gemeinsam um 0°, 90°, 180° oder 270° drehen.
+- **Dauerbetrieb:** Bildschirm während der Wiedergabe aktiv halten und App optional nach dem Fire-TV-Neustart öffnen.
+- **Updates:** Die App prüft GitHub Releases und bietet die aktuelle APK direkt zum Laden an.
+- **Ältere Fire TVs:** Mindestversion Android API 22 (Fire OS 5), inklusive klassischer APK-Signatur.
+- **Demo:** [Interaktive Vorschau](https://weisser-dev.github.io/fire-tv-diashow/) mit Bildformat, Übergängen, Schlafzustand, Uhr/Datum/Wetter und Fernbedienungs-Kontextmenü. Es werden keine Dateien über die Demo hochgeladen.
 
-## Google Fotos
+## Handy-Upload und lokale Alben
 
-Der TV-Gerätecode-Login kann den Photos-Picker-Scope nicht anfordern. Deshalb öffnet Photo Carousel für die Google-Anmeldung den normalen Browser auf dem Fire TV. Die App stellt dafür eine kurzlebige Anmeldeseite nur auf `127.0.0.1` bereit. Google Identity Services liefert einen kurzlebigen Zugriffstoken an diese lokale Seite; die App speichert den Token nicht dauerhaft und fordert anschließend ausschließlich `photospicker.mediaitems.readonly` an. Der Photos-Picker zeigt einen QR-Code, den du mit dem Handy scannst, um die gewünschten Fotos auszuwählen. Danach lädt die App die ausgewählten Bilder in ihren privaten Speicher.
+Wähle **Handy-Upload**, scanne den QR-Code und öffne die angezeigte Seite auf einem Smartphone im selben WLAN. Dort kannst du einen Albumname und mehrere Bilder angeben. Bilder, die größer als 1920 × 1920 Pixel oder 8 MB sind, werden im Browser proportional verkleinert und als JPEG komprimiert, bevor sie übertragen werden. In der App lassen sich Upload-Alben filtern und einzelne Bilder löschen.
 
-Für den Browser-Login wird ein OAuth-Webclient mit dem JavaScript-Ursprung `http://127.0.0.1:8765` verwendet. Das Client-ID-Kennzeichen ist öffentlich und im Build enthalten; ein OAuth-Client-Secret wird weder in der App noch im Repository verwendet. Google kann bei nicht verifizierten Apps einen Warnhinweis zeigen und den Login zunächst auf eine begrenzte Zahl von Testkonten beschränken. Google muss die App verifizieren, bevor der Picker allgemein freigegeben werden kann.
-
-Die **Ambient API** bleibt unabhängig davon deaktiviert. Sie benötigt eine separate Aufnahme des Cloud-Projekts ins [Google Photos Partner Program](https://developers.google.com/photos/partner-program/overview); ein OAuth-Webclient für den Picker erteilt diese Freigabe nicht.
-
-Picker-Bilder werden nach dem Download im privaten App-Speicher zwischengespeichert und stehen auch ohne aktive Google-Verbindung weiter zur Verfügung. Zum Aktualisieren der Auswahl muss erneut eine Picker-Sitzung gestartet werden.
+Der Upload-Server läuft nur, solange sein QR-Dialog offen ist. Der zufällige Link gilt für diese Sitzung; Uploads sind auf lokale Netzwerkadressen beschränkt und pro Datei auf 50 MB begrenzt. Entwickleroptionen sind nicht erforderlich. Ein optionaler vierstelliger PIN ist für den Handy-Upload vorgesehen.
 
 ## Bauen und installieren
 
-Benötigt JDK 17 und Android SDK Platform 36. Auf macOS liegt das SDK üblicherweise unter `~/Library/Android/sdk`.
+Benötigt JDK 17 und Android SDK Platform 36.
 
 ```sh
 ./gradlew assembleDebug
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Alternativ das Projekt in Android Studio öffnen und die `app`-Konfiguration starten. Mindestversion ist Android 5.1 (API 22, Fire OS 5). Fire-TV-Geräte können lokale Bilder verwenden.
+Mindestversion ist Android 5.1 (API 22, Fire OS 5).
 
 ## CI, APK und GitHub Pages
 
-- Pushes auf `main` und Pull Requests erstellen ein Debug-APK-Artefakt in GitHub Actions.
-- Ein Versionstag wie `v0.2.0` erstellt ein signiertes Release-APK und veröffentlicht es als öffentliches GitHub Release.
-- Die [Download- und Demo-Seite](https://weisser-dev.github.io/google-photos-carousel/) verweist auf die neueste APK. Downloader-Adresse: `https://github.com/weisser-dev/google-photos-carousel/releases/latest/download/app-release.apk`.
-- Die installierte App prüft beim Start automatisch auf neuere stabile GitHub-Releases. Bei einem Treffer kann man die APK direkt laden und den Systemdialog zur Installation öffnen. Android/Fire OS verlangt weiterhin eine Bestätigung; ab Android 8 muss gegebenenfalls die Installation unbekannter Apps für Photo Carousel erlaubt werden.
-- Android Signatur-Secrets: `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` und `ANDROID_STORE_PASSWORD`. Bei Folgeversionen immer denselben Keystore benutzen.
+- Pushes auf `main` erstellen ein Debug-APK-Artefakt in GitHub Actions.
+- Ein Versionstag wie `v0.11.0` erstellt ein signiertes Release-APK und veröffentlicht es öffentlich.
+- [Download und Demo](https://weisser-dev.github.io/fire-tv-diashow/); Downloader-Adresse: `https://github.com/weisser-dev/fire-tv-diashow/releases/latest/download/app-release.apk`.
+- Releases verwenden dieselben vier Secrets: `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` und `ANDROID_STORE_PASSWORD`.
 
-## Private lokale Dateien
+## Private Dateien
 
-APK-Dateien, dekompilierte Drittanbieterquellen, Build-Ausgaben, Signaturschlüssel und OAuth-JSON-Dateien sind durch `.gitignore` ausgeschlossen. Die fünf Demo-Fotos unter `docs/demo/` sind eigens für die öffentliche Demo generierte Landschaftsbilder; private Testbilder bleiben außerhalb dieses Repositories.
+APK-Dateien, dekompilierte Drittanbieterquellen, Build-Ausgaben und Signaturschlüssel sind durch `.gitignore` ausgeschlossen. Die Demo-Fotos in `docs/demo/` sind eigens generierte Landschaftsbilder; private Testbilder bleiben außerhalb dieses Repositories.
 
 ## Lizenz
 

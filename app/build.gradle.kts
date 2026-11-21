@@ -18,14 +18,8 @@ android {
         applicationId = "dev.weisser.googlephotoscarousel"
         minSdk = 22
         targetSdk = 35
-        versionCode = 18
-        versionName = "0.10.8"
-        val pickerWebClientId = providers.gradleProperty("pickerWebClientId").orElse(providers.environmentVariable("PICKER_WEB_CLIENT_ID")).getOrElse("550970757162-file3452tg4735osovs3e38l4hr92obt.apps.googleusercontent.com")
-        buildConfigField("String", "PICKER_WEB_CLIENT_ID", "\"${pickerWebClientId}\"")
-        val ambientClientId = providers.gradleProperty("ambientClientId").orElse(providers.environmentVariable("AMBIENT_CLIENT_ID")).getOrElse("")
-        val ambientClientSecret = providers.gradleProperty("ambientClientSecret").orElse(providers.environmentVariable("AMBIENT_CLIENT_SECRET")).getOrElse("")
-        buildConfigField("String", "AMBIENT_CLIENT_ID", "\"${ambientClientId}\"")
-        buildConfigField("String", "AMBIENT_CLIENT_SECRET", "\"${ambientClientSecret}\"")
+        versionCode = 20
+        versionName = "0.11.0"
     }
 
     val releaseStoreFile = providers.gradleProperty("releaseStoreFile").orNull
@@ -77,7 +71,6 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.9.4")
-    implementation("com.google.android.gms:play-services-auth:21.4.0")
     implementation("com.squareup.okhttp3:okhttp:5.1.0")
     implementation("com.google.zxing:core:3.5.3")
     implementation("io.coil-kt:coil-compose:2.7.0")

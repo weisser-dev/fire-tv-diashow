@@ -9,8 +9,8 @@ import java.util.concurrent.TimeUnit
 internal data class AppRelease(val tag: String, val apkUrl: String)
 
 internal object ReleaseUpdater {
-    private const val API_URL = "https://api.github.com/repos/weisser-dev/google-photos-carousel/releases/latest"
-    private const val DOWNLOAD_PREFIX = "https://github.com/weisser-dev/google-photos-carousel/releases/download/"
+    private const val API_URL = "https://api.github.com/repos/weisser-dev/fire-tv-diashow/releases/latest"
+    private const val DOWNLOAD_PREFIX = "https://github.com/weisser-dev/fire-tv-diashow/releases/download/"
     private val http = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(45, TimeUnit.SECONDS)
@@ -37,7 +37,7 @@ internal object ReleaseUpdater {
     }
 
     fun isNewer(remoteTag: String, currentVersion: String): Boolean {
-        fun parts(value: String) = value.removePrefix("v").split('.').map { it.toIntOrNull() ?: 0 }
+        fun parts(value: String) = value.removePrefix("v").substringBefore('-').split('.').map { it.toIntOrNull() ?: 0 }
         val remote = parts(remoteTag)
         val current = parts(currentVersion)
         for (index in 0 until maxOf(remote.size, current.size)) {
