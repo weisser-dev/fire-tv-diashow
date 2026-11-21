@@ -21,8 +21,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 class LocalPhotoUploadServer(
     private val filesDir: File,
     private val onPhotoUploaded: (File, String) -> Unit,
-    private val readNote: () -> String,
-    private val onNoteUpdated: (String) -> Unit
+    private val readPhoneContent: () -> String,
+    private val onPhoneContentUpdated: (String) -> Unit
 ) {
     private val token = ByteArray(24).also(SecureRandom()::nextBytes).joinToString("") { "%02x".format(it) }
     private val running = AtomicBoolean(false)
@@ -82,18 +82,18 @@ class LocalPhotoUploadServer(
                 if (separator > 0) headers[header.substring(0, separator).trim().lowercase(Locale.ROOT)] = header.substring(separator + 1).trim()
             }
             when {
-                method == "GET" && rawPath == "/upload/$token" -> respond(client, 200, "text/html; charset=utf-8", uploadPage(readNote()))
+                method == "GET" && rawPath == "/upload/$token" -> respond(client, 200, "text/html; charset=utf-8", uploadPage(readPhoneContent()))
                 method == "POST" && rawPath == "/api/upload/$token" -> receivePhoto(client, input, headers, query)
-                method == "POST" && rawPath == "/api/note/$token" -> receiveNote(client, input, headers)
+                method == "POST" && rawPath == "/api/content/$token" -> receivePhoneContent(client, input, headers)
                 else -> respond(client, 404, "text/plain; charset=utf-8", "Nicht gefunden.")
             }
         }
     }
 
-    private fun receiveNote(socket: Socket, input: BufferedInputStream, headers: Map<String, String>) {
+    private fun receivePhoneContent(socket: Socket, input: BufferedInputStream, headers: Map<String, String>) {
         val length = headers["content-length"]?.toIntOrNull()
-        if (length == null || length > MAX_NOTE_BYTES) {
-            respond(socket, 413, "application/json; charset=utf-8", "{\"error\":\"Die Notiz ist zu lang. Maximal 240 Zeichen.\"}")
+        if (length == null || length < 0 || length > MAX_CONTENT_BYTES) {
+            respond(socket, 413, "application/json; charset=utf-8", "{\"error\":\"Die Listen sind zu groß.\"}")
             return
         }
         val bytes = ByteArray(length)
@@ -101,17 +101,22 @@ class LocalPhotoUploadServer(
         while (offset < bytes.size) {
             val count = input.read(bytes, offset, bytes.size - offset)
             if (count < 0) {
-                respond(socket, 400, "application/json; charset=utf-8", "{\"error\":\"Die Notiz wurde unvollständig übertragen.\"}")
+                respond(socket, 400, "application/json; charset=utf-8", "{\"error\":\"Die Listen wurden unvollständig übertragen.\"}")
                 return
             }
             offset += count
         }
-        val note = String(bytes, StandardCharsets.UTF_8)
-        if (note.length > MAX_NOTE_CHARACTERS) {
-            respond(socket, 413, "application/json; charset=utf-8", "{\"error\":\"Die Notiz darf höchstens 240 Zeichen enthalten.\"}")
+        val content = String(bytes, StandardCharsets.UTF_8)
+        val json = runCatching { JSONObject(content) }.getOrNull()
+        val notes = json?.optJSONArray("notes")
+        val todos = json?.optJSONArray("todos")
+        if (notes == null || todos == null || notes.length() > MAX_NOTES || todos.length() > MAX_TODOS ||
+            (0 until notes.length()).any { notes.optJSONObject(it)?.optString("text").orEmpty().length > MAX_NOTE_CHARACTERS } ||
+            (0 until todos.length()).any { todos.optJSONObject(it)?.optString("text").orEmpty().length > MAX_NOTE_CHARACTERS }) {
+            respond(socket, 400, "application/json; charset=utf-8", "{\"error\":\"Ungültige oder zu lange Notiz-/Aufgabenliste.\"}")
             return
         }
-        onNoteUpdated(note)
+        onPhoneContentUpdated(json.toString())
         respond(socket, 200, "application/json; charset=utf-8", "{\"ok\":true}")
     }
 
@@ -169,7 +174,7 @@ class LocalPhotoUploadServer(
         }
     }
 
-    private fun uploadPage(noteText: String): String {
+    private fun uploadPage(phoneContent: String): String {
         fun html(value: String) = value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&#39;")
         val albums = scan(filesDir).map { it.album }.distinct().sorted()
         val knownAlbums = albums.joinToString("") { album -> "<option value=\"" + html(album) + "\">" + html(album) + "</option>" }
@@ -178,12 +183,14 @@ class LocalPhotoUploadServer(
         <meta name="color-scheme" content="dark"><title>Stillframe verwalten</title><style>
         *{box-sizing:border-box}body{margin:0;min-height:100vh;background:#10141b;color:#f5f2eb;font:17px system-ui,sans-serif;padding:22px;display:grid;place-items:center}
         main{width:min(680px,100%);background:#1b222c;border:1px solid #394654;border-radius:22px;padding:26px}h1{font-size:27px;margin:0 0 8px}h2{font-size:19px;margin:24px 0 4px}p{line-height:1.5;color:#cbd2db}
-        label{display:block;margin:18px 0 8px;font-weight:650}input,button,select,textarea{font:inherit;width:100%;padding:14px;border-radius:12px}input,select,textarea{background:#10141b;color:#fff;border:1px solid #526070}textarea{min-height:110px;resize:vertical}input[type=file]{padding:12px}select{appearance:auto}.check{display:flex;gap:12px;align-items:center;margin:16px 0}.check input{width:22px;height:22px;accent-color:#e8c98c}.check label{margin:0}.hidden{display:none}
+        label{display:block;margin:18px 0 8px;font-weight:650}input,button,select,textarea{font:inherit;width:100%;padding:14px;border-radius:12px}input,select,textarea{background:#10141b;color:#fff;border:1px solid #526070}textarea{min-height:74px;resize:vertical}input[type=file]{padding:12px}select{appearance:auto}.check{display:flex;gap:12px;align-items:center;margin:16px 0}.check input{width:22px;height:22px;accent-color:#e8c98c}.check label{margin:0}.hidden{display:none}
+        .lists{display:flex;flex-direction:column;gap:20px}.row,.note-row{display:grid;grid-template-columns:24px 1fr 38px;gap:10px;align-items:center;margin:8px 0;padding:10px;border:1px solid #394654;border-radius:12px;background:#151b23}.row input{width:22px;height:22px;accent-color:#e8c98c}.row span{overflow-wrap:anywhere}.note-row{grid-template-columns:1fr 38px}.note-row textarea{min-height:56px}.entry{display:grid;gap:8px}.entry button,.remove{width:auto;margin:0;padding:8px 12px}.remove{background:transparent;color:#cbd2db;border:1px solid #526070;font-size:22px}
         button{margin-top:18px;border:0;background:#e8c98c;color:#10141b;font-weight:750}button:disabled{opacity:.55}.status{min-height:2em;color:#42d9ff;white-space:pre-line}.note{font-size:13px;color:#9da8b6}
         </style></head><body><main><h1>Stillframe vom Handy verwalten</h1>
-        <p>Notiz bearbeiten oder neue Fotos direkt im selben WLAN an den Fernseher senden.</p>
-        <h2>Notiz</h2><label for="note-text">Text, der auf dem Fernseher angezeigt wird</label><textarea id="note-text" maxlength="$MAX_NOTE_CHARACTERS">${html(noteText)}</textarea>
-        <button type="button" id="save-note">Notiz auf dem Fernseher speichern</button><p class="status" id="note-status" aria-live="polite"></p>
+        <p>Aufgaben abhaken, Notizen pflegen oder neue Fotos direkt im selben WLAN an den Fernseher senden.</p>
+        <div class="lists"><section><h2>Aufgaben</h2><div id="todos"></div><div class="entry"><input id="todo-input" maxlength="$MAX_NOTE_CHARACTERS" placeholder="Neue Aufgabe"><button type="button" id="add-todo">Aufgabe hinzufügen</button></div></section>
+        <section><h2>Notizen</h2><div id="notes"></div><div class="entry"><input id="note-input" maxlength="$MAX_NOTE_CHARACTERS" placeholder="Neue Notiz"><button type="button" id="add-note">Notiz hinzufügen</button></div></section></div>
+        <p class="status" id="content-status" aria-live="polite"></p><pre id="initial-data" class="hidden">${html(phoneContent)}</pre>
         <h2>Fotos</h2>
         <p>Wähle einen vorhandenen Ordner oder erstelle einen neuen. Die Fotos werden direkt über dein WLAN auf den Fernseher übertragen.</p>
         <label for="album">Ordner auf dem Fernseher</label><select id="album">$knownAlbums<option value="__new__">Neuer Ordner …</option></select>
@@ -195,8 +202,14 @@ class LocalPhotoUploadServer(
         <p class="note">Der persönliche Link funktioniert nur im selben WLAN, solange Stillframe auf dem Fernseher läuft. Keine Google-Anmeldung erforderlich.</p></main>
         <script>
         const input=document.getElementById('photos'), album=document.getElementById('album'), newFolder=document.getElementById('new-folder'), newFolderWrap=document.getElementById('new-folder-wrap'), compress=document.getElementById('compress'), button=document.getElementById('send'), status=document.getElementById('status');
-        const noteInput=document.getElementById('note-text'), noteButton=document.getElementById('save-note'), noteStatus=document.getElementById('note-status');
-        noteButton.onclick=async()=>{noteButton.disabled=true;noteStatus.textContent='Speichere Notiz …';try{const response=await fetch('/api/note/$token',{method:'POST',headers:{'Content-Type':'text/plain; charset=utf-8'},body:noteInput.value});const result=await response.json();if(!response.ok)throw Error(result.error||'Speichern fehlgeschlagen');noteStatus.textContent='Notiz auf dem Fernseher gespeichert.'}catch(error){noteStatus.textContent=error.message||'Verbindung zum Fernseher fehlgeschlagen.'}finally{noteButton.disabled=false}};
+        const todoList=document.getElementById('todos'), noteList=document.getElementById('notes'), contentStatus=document.getElementById('content-status');
+        const content=JSON.parse(document.getElementById('initial-data').textContent||'{"notes":[],"todos":[]}');
+        content.notes=Array.isArray(content.notes)?content.notes:[];content.todos=Array.isArray(content.todos)?content.todos:[];
+        const saveContent=async()=>{contentStatus.textContent='Speichere …';try{const response=await fetch('/api/content/$token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(content)});const result=await response.json();if(!response.ok)throw Error(result.error||'Speichern fehlgeschlagen');contentStatus.textContent='Aufgaben und Notizen auf dem Fernseher gespeichert.'}catch(error){contentStatus.textContent=error.message||'Verbindung zum Fernseher fehlgeschlagen.'}};
+        function render(){todoList.replaceChildren();noteList.replaceChildren();content.todos.forEach((item,i)=>{const row=document.createElement('div');row.className='row';const check=document.createElement('input');check.type='checkbox';check.checked=!!item.done;check.onchange=()=>{item.done=check.checked;saveContent()};const text=document.createElement('span');text.textContent=item.text;const remove=document.createElement('button');remove.className='remove';remove.textContent='×';remove.setAttribute('aria-label','Aufgabe löschen');remove.onclick=()=>{content.todos.splice(i,1);render();saveContent()};row.append(check,text,remove);todoList.append(row)});content.notes.forEach((item,i)=>{const row=document.createElement('div');row.className='note-row';const text=document.createElement('textarea');text.value=item.text;text.maxLength=$MAX_NOTE_CHARACTERS;text.setAttribute('aria-label','Notiz');text.onchange=()=>{item.text=text.value;saveContent()};const remove=document.createElement('button');remove.className='remove';remove.textContent='×';remove.setAttribute('aria-label','Notiz löschen');remove.onclick=()=>{content.notes.splice(i,1);render();saveContent()};row.append(text,remove);noteList.append(row)})}
+        const newId=()=>Date.now().toString(36)+Math.random().toString(36).slice(2);
+        document.getElementById('add-todo').onclick=()=>{const field=document.getElementById('todo-input'),text=field.value.trim();if(!text)return;content.todos.push({id:newId(),text,done:false});field.value='';render();saveContent()};
+        document.getElementById('add-note').onclick=()=>{const field=document.getElementById('note-input'),text=field.value.trim();if(!text)return;content.notes.push({id:newId(),text});field.value='';render();saveContent()};render();
         album.addEventListener('change',()=>{const isNew=album.value==='__new__';newFolderWrap.classList.toggle('hidden',!isNew);if(isNew)newFolder.focus();});
         if(album.options.length===1||album.options[0].value==='__new__'){album.value='__new__';newFolderWrap.classList.remove('hidden');}
         async function prepare(file,compressEnabled){
@@ -265,8 +278,10 @@ class LocalPhotoUploadServer(
 
     companion object {
         private const val MAX_PHOTO_BYTES = 50L * 1024 * 1024
-        private const val MAX_NOTE_BYTES = 960
+        private const val MAX_CONTENT_BYTES = 12_000
         private const val MAX_NOTE_CHARACTERS = 240
+        private const val MAX_NOTES = 12
+        private const val MAX_TODOS = 20
         private val ALLOWED_EXTENSIONS = setOf("jpg", "jpeg", "png", "webp", "gif", "heic", "heif")
 
         fun scan(filesDir: File): List<UploadedPhoto> {

@@ -98,7 +98,7 @@ class MainActivity : ComponentActivity() {
     private var uploadDialogVisible by mutableStateOf(false)
     private var uploadStatus by mutableStateOf("")
     private var uploadServer: LocalPhotoUploadServer? = null
-    private var phoneNoteUpdate by mutableStateOf<String?>(null)
+    private var phoneContentUpdate by mutableStateOf<String?>(null)
     private var remoteKeyHandler: ((Int) -> Boolean)? = null
     private val remoteHandledKeys = mutableSetOf<Int>()
     private var playbackControlsPulse by mutableIntStateOf(0)
@@ -244,11 +244,13 @@ class MainActivity : ComponentActivity() {
             var calendarStatus by remember { mutableStateOf("") }
             var notesEnabled by remember { mutableStateOf(prefs.getBoolean("notes_enabled", false)) }
             var noteText by remember { mutableStateOf(prefs.getString("note_text", "").orEmpty()) }
-            LaunchedEffect(phoneNoteUpdate) {
-                phoneNoteUpdate?.let { updated ->
-                    noteText = updated
-                    notesEnabled = true
-                    phoneNoteUpdate = null
+            var phoneContent by remember { mutableStateOf(parsePhoneContent(prefs.getString("phone_content", null), noteText)) }
+            LaunchedEffect(phoneContentUpdate) {
+                phoneContentUpdate?.let { updated ->
+                    phoneContent = parsePhoneContent(updated, "")
+                    noteText = phoneContent.notes.joinToString("\n") { it.text }
+                    notesEnabled = phoneContent.notes.isNotEmpty() || phoneContent.todos.isNotEmpty()
+                    phoneContentUpdate = null
                 }
             }
             LaunchedEffect(orientationChosen) {
@@ -448,6 +450,15 @@ class MainActivity : ComponentActivity() {
                     }
                     if (index >= images.size - 1) index = (images.size - 2).coerceAtLeast(0)
                 }
+                fun beginPlayback() {
+                    if (images.isEmpty()) {
+                        message = "Füge zuerst Bilder hinzu."
+                        return
+                    }
+                    if (shuffle) index = images.indices.random()
+                    playing = true
+                    paused = false
+                }
                 LaunchedEffect(playing, paused, index, images.size) {
                     logRemote("playback state playing=$playing paused=$paused index=$index/${images.size} rotation=$displayRotation")
                 }
@@ -635,7 +646,7 @@ class MainActivity : ComponentActivity() {
                                         }
                                         4 -> { newestUploadsFirst = !newestUploadsFirst; prefs.edit().putBoolean("newest_uploads_first", newestUploadsFirst).apply() }
                                         5 -> { /* Photo manager is handled above. */ }
-                                        6 -> if (images.isNotEmpty()) { playing = true; paused = false } else message = "Füge zuerst Bilder hinzu."
+                                        6 -> beginPlayback()
                                         7 -> if (updateRelease != null) downloadOrInstallUpdate() else checkForUpdates(force = true)
                                         8 -> downloadOrInstallUpdate()
                                     }
@@ -786,10 +797,10 @@ class MainActivity : ComponentActivity() {
                     ) {
                             val modalVisible = showSettings || showPhotoManager || message != null || !orientationChosen || uploadDialogVisible || showPinSetup
                     if (sleeping) {
-                        SleepScreen(showClock, showDate, weatherEnabled, weatherLabel, glassOverlay, if (calendarEnabled) calendarEvents else emptyList(), if (notesEnabled) noteText else "")
+                        SleepScreen(showClock, showDate, weatherEnabled, weatherLabel, glassOverlay, if (calendarEnabled) calendarEvents else emptyList(), if (notesEnabled) phoneContent else PhoneContent(), uploadUrl) { startPhotoUpload() }
                     } else if (playing && images.isNotEmpty()) {
                         PlaybackView(images, index, nextSlideIndex, panZoom, seconds, motionSeconds, playing, paused, imageScaleMode, imagePaddingDp, playbackControlsPulse, transitionStyle, pauseMenuIndex, shuffle, sleepTimerMinutes,
-                            showClock, showDate, weatherEnabled, weatherLabel, glassOverlay, if (calendarEnabled) calendarEvents else emptyList(), if (notesEnabled) noteText else "",
+                            showClock, showDate, weatherEnabled, weatherLabel, glassOverlay, if (calendarEnabled) calendarEvents else emptyList(), if (notesEnabled) phoneContent else PhoneContent(), uploadUrl,
                             onNextPreloaded = { loadedNextPhoto = it },
                             onNextPreloadFailed = { failedPreloadPhotos = failedPreloadPhotos + it },
                             onImageMotionRequired = { currentImageNeedsMotion = it },
@@ -800,7 +811,7 @@ class MainActivity : ComponentActivity() {
                             onCycleMotionDuration = { direction -> motionSeconds = cycleValue(motionSeconds, listOf(15, 30, 45, 60), direction); prefs.edit().putInt("motion_seconds", motionSeconds).apply() },
                             onCycleTransition = { direction -> transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut", "slide", "zoom"), direction); prefs.edit().putString("transition_style", transitionStyle).apply() },
                             onCycleScale = { direction -> imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch", "ken_burns"), direction); prefs.edit().putString("image_scale_mode", imageScaleMode).apply() },
-                            onToggleShuffle = { shuffle = !shuffle; prefs.edit().putBoolean("shuffle", shuffle).apply() },
+                            onToggleShuffle = { shuffle = !shuffle; prefs.edit().putBoolean("shuffle", shuffle).apply() }, onOpenUploadQr = { startPhotoUpload() },
                             onCycleSleepTimer = { direction -> sleepTimerMinutes = cycleValue(sleepTimerMinutes, listOf(0, 15, 30, 60), direction); prefs.edit().putInt("sleep_timer_minutes", sleepTimerMinutes).apply(); sleepDeadline = if (sleepTimerMinutes == 0) 0L else System.currentTimeMillis() + sleepTimerMinutes * 60_000L },
                             onSleepNow = { sleeping = true; manualSleepOverride = true; playing = false; paused = false; sleepDeadline = 0L },
                             onExit = { playing = false; paused = false; sleepDeadline = 0L })
@@ -929,7 +940,7 @@ class MainActivity : ComponentActivity() {
                                 }
                                 Spacer(Modifier.height(20.dp))
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                        Button(onClick = { logRemote("play clicked images=${images.size} rotation=$displayRotation"); if (images.isNotEmpty()) { playing = true; paused = false } else message = "Füge zuerst Bilder hinzu." }, colors = ButtonDefaults.buttonColors(containerColor = if (playButtonFocused || mainFocusNode == 6) RemoteFocusSurface else Accent, contentColor = if (playButtonFocused || mainFocusNode == 6) Color.White else Ink), modifier = Modifier.height(54.dp).focusRequester(playFocusRequester).onFocusChanged { playButtonFocused = it.isFocused; if (it.isFocused) mainFocusNode = 6 }.then(if (playButtonFocused || mainFocusNode == 6) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(14.dp)) else Modifier)) {
+                                        Button(onClick = { logRemote("play clicked images=${images.size} rotation=$displayRotation shuffle=$shuffle"); beginPlayback() }, colors = ButtonDefaults.buttonColors(containerColor = if (playButtonFocused || mainFocusNode == 6) RemoteFocusSurface else Accent, contentColor = if (playButtonFocused || mainFocusNode == 6) Color.White else Ink), modifier = Modifier.height(54.dp).focusRequester(playFocusRequester).onFocusChanged { playButtonFocused = it.isFocused; if (it.isFocused) mainFocusNode = 6 }.then(if (playButtonFocused || mainFocusNode == 6) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(14.dp)) else Modifier)) {
                                         Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(6.dp)); Text("Abspielen", fontWeight = FontWeight.Bold)
                                     }
                                     OutlinedButton(onClick = { index = (index - 1 + images.size) % images.size }, modifier = Modifier.height(54.dp)) { Icon(Icons.Default.SkipPrevious, "Vorheriges Bild") }
@@ -1079,11 +1090,6 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     }
-                    if (uploadUrl != null && !uploadDialogVisible && orientationChosen && !showSettings && !showPhotoManager && message == null && !showPinSetup && !confirmDeleteSelected) {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomEnd) {
-                            PersistentQrBadge(uploadUrl!!, Modifier.padding(12.dp)) { startPhotoUpload() }
-                        }
-                    }
                     }
                 }
             }
@@ -1115,12 +1121,20 @@ class MainActivity : ComponentActivity() {
                     uploadStatus = "${uploadedPhotos.size} Bilder empfangen. Du kannst weitere senden."
                 }
             },
-            readNote = { prefs.getString("note_text", "").orEmpty() },
-            onNoteUpdated = { updated ->
+            readPhoneContent = {
+                val legacy = prefs.getString("note_text", "").orEmpty()
+                serializePhoneContent(parsePhoneContent(prefs.getString("phone_content", null), legacy))
+            },
+            onPhoneContentUpdated = { updated ->
                 runOnUiThread {
-                    prefs.edit().putString("note_text", updated).putBoolean("notes_enabled", true).apply()
-                    phoneNoteUpdate = updated
-                    uploadStatus = "Notiz auf dem Fernseher gespeichert."
+                    val parsed = parsePhoneContent(updated, "")
+                    val summary = buildList {
+                        parsed.todos.forEach { add("${if (it.done) "☑" else "□"} ${it.text}") }
+                        parsed.notes.forEach { add(it.text) }
+                    }.joinToString("\n")
+                    prefs.edit().putString("phone_content", updated).putString("note_text", summary).putBoolean("notes_enabled", true).apply()
+                    phoneContentUpdate = updated
+                    uploadStatus = "Aufgaben und Notizen auf dem Fernseher gespeichert."
                 }
             }
         )
@@ -1273,12 +1287,12 @@ private fun EmptyState() {
 private fun PlaybackView(
     images: List<String>, index: Int, nextIndex: Int, panZoom: Boolean, seconds: Int, motionSeconds: Int, playing: Boolean,
     paused: Boolean, imageScaleMode: String, imagePaddingDp: Int, controlsPulse: Int, transitionStyle: String, pauseMenuIndex: Int, shuffle: Boolean, sleepTimerMinutes: Int,
-    showClock: Boolean, showDate: Boolean, showWeather: Boolean, weatherLabel: String, glassOverlay: Boolean, calendarEvents: List<CalendarEvent>, noteText: String,
+    showClock: Boolean, showDate: Boolean, showWeather: Boolean, weatherLabel: String, glassOverlay: Boolean, calendarEvents: List<CalendarEvent>, phoneContent: PhoneContent, uploadUrl: String?,
     onNextPreloaded: (String) -> Unit, onNextPreloadFailed: (String) -> Unit,
     onImageMotionRequired: (Boolean) -> Unit,
     onPause: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onResume: () -> Unit,
     onAddImages: () -> Unit, onAddFiles: () -> Unit, onCycleSpeed: (Int) -> Unit, onCycleMotionDuration: (Int) -> Unit,
-    onCycleTransition: (Int) -> Unit, onCycleScale: (Int) -> Unit, onToggleShuffle: () -> Unit, onCycleSleepTimer: (Int) -> Unit,
+    onCycleTransition: (Int) -> Unit, onCycleScale: (Int) -> Unit, onToggleShuffle: () -> Unit, onOpenUploadQr: () -> Unit, onCycleSleepTimer: (Int) -> Unit,
     onSleepNow: () -> Unit, onExit: () -> Unit
 ) {
     BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
@@ -1434,8 +1448,8 @@ private fun PlaybackView(
                 )
             }
         }
-        if (showClock || showDate || showWeather && weatherLabel.isNotBlank() || calendarEvents.isNotEmpty() || noteText.isNotBlank()) {
-            TimeWeatherOverlay(showClock, showDate, showWeather, weatherLabel, glassOverlay, imagePaddingDp, calendarEvents, noteText)
+        if (showClock || showDate || showWeather && weatherLabel.isNotBlank() || calendarEvents.isNotEmpty() || phoneContent.hasContent || uploadUrl != null) {
+            TimeWeatherOverlay(showClock, showDate, showWeather, weatherLabel, glassOverlay, imagePaddingDp, calendarEvents, phoneContent, uploadUrl, onOpenUploadQr)
         }
         if (paused) {
             Box(Modifier.fillMaxSize().background(Color(0x66000000)), contentAlignment = Alignment.Center) {
@@ -1502,7 +1516,7 @@ private fun PlaybackView(
 }
 
 @Composable
-private fun TimeWeatherOverlay(showClock: Boolean, showDate: Boolean, showWeather: Boolean, weatherLabel: String, glassOverlay: Boolean, imagePaddingDp: Int, calendarEvents: List<CalendarEvent>, noteText: String) {
+private fun TimeWeatherOverlay(showClock: Boolean, showDate: Boolean, showWeather: Boolean, weatherLabel: String, glassOverlay: Boolean, imagePaddingDp: Int, calendarEvents: List<CalendarEvent>, phoneContent: PhoneContent, uploadUrl: String?, onOpenUploadQr: () -> Unit) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { delay(15_000); now = System.currentTimeMillis() } }
     val date = remember(now) { java.text.SimpleDateFormat("EEEE, d. MMMM", java.util.Locale.getDefault()).format(java.util.Date(now)) }
@@ -1518,21 +1532,26 @@ private fun TimeWeatherOverlay(showClock: Boolean, showDate: Boolean, showWeathe
         Row(Modifier.fillMaxWidth().padding((imagePaddingDp + 42).dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
             if (showClock) Text(time, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Medium,
                 modifier = Modifier.then(glassModifier).padding(horizontal = if (glassOverlay) 18.dp else 12.dp, vertical = if (glassOverlay) 12.dp else 8.dp))
-            Column(Modifier.then(glassModifier).padding(horizontal = if (glassOverlay) 18.dp else 12.dp, vertical = if (glassOverlay) 12.dp else 8.dp), horizontalAlignment = Alignment.End) {
-                if (showDate) Text(date, color = Color(0xFFE1E5EA), fontSize = 12.sp)
-                if (showWeather && weatherLabel.isNotBlank()) Text(weatherLabel, color = Color(0xFFE1E5EA), fontSize = 12.sp)
+            Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (showDate || showWeather && weatherLabel.isNotBlank()) Column(Modifier.then(glassModifier).padding(horizontal = if (glassOverlay) 18.dp else 12.dp, vertical = if (glassOverlay) 12.dp else 8.dp), horizontalAlignment = Alignment.End) {
+                    if (showDate) Text(date, color = Color(0xFFE1E5EA), fontSize = 12.sp)
+                    if (showWeather && weatherLabel.isNotBlank()) Text(weatherLabel, color = Color(0xFFE1E5EA), fontSize = 12.sp)
+                }
+                if (uploadUrl != null) PersistentQrBadge(uploadUrl, Modifier.size(58.dp), onOpenUploadQr)
             }
         }
-        if (calendarEvents.isNotEmpty()) {
+        if (calendarEvents.isNotEmpty() || phoneContent.hasContent) {
             val inset = (imagePaddingDp + 42).dp
-            CalendarAgenda(calendarEvents, glassOverlay, Modifier.align(Alignment.BottomStart).padding(start = inset, bottom = (imagePaddingDp + 40).dp).widthIn(max = ((maxWidth - inset * 2) / 2).coerceAtLeast(120.dp)))
+            Row(Modifier.align(Alignment.BottomStart).padding(start = inset, end = inset, bottom = (imagePaddingDp + 45).dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
+                if (calendarEvents.isNotEmpty()) CalendarAgenda(calendarEvents, glassOverlay, Modifier.weight(1f).height(140.dp))
+                if (phoneContent.hasContent) PhoneListsCard(phoneContent, glassOverlay, Modifier.weight(1f).height(140.dp))
+            }
         }
-        if (noteText.isNotBlank()) NoteCard(noteText, glassOverlay, Modifier.align(Alignment.BottomStart).padding((imagePaddingDp + 20).dp))
     }
 }
 
 @Composable
-private fun SleepScreen(showClock: Boolean, showDate: Boolean, showWeather: Boolean, weatherLabel: String, glassOverlay: Boolean, calendarEvents: List<CalendarEvent>, noteText: String) {
+private fun SleepScreen(showClock: Boolean, showDate: Boolean, showWeather: Boolean, weatherLabel: String, glassOverlay: Boolean, calendarEvents: List<CalendarEvent>, phoneContent: PhoneContent, uploadUrl: String?, onOpenUploadQr: () -> Unit) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { delay(15_000); now = System.currentTimeMillis() } }
     val date = remember(now) { java.text.SimpleDateFormat("EEEE, d. MMMM", java.util.Locale.getDefault()).format(java.util.Date(now)) }
@@ -1551,8 +1570,13 @@ private fun SleepScreen(showClock: Boolean, showDate: Boolean, showWeather: Bool
                 }
             }
         }
-        if (calendarEvents.isNotEmpty()) CalendarAgenda(calendarEvents, false, Modifier.align(Alignment.BottomStart).padding(start = 42.dp, bottom = 18.dp).widthIn(max = maxWidth / 2), dimmed = true)
-        if (noteText.isNotBlank()) NoteCard(noteText, false, Modifier.align(Alignment.BottomStart).padding(18.dp))
+        if (uploadUrl != null) PersistentQrBadge(uploadUrl, Modifier.align(Alignment.TopEnd).padding(20.dp).size(58.dp), onOpenUploadQr)
+        if (calendarEvents.isNotEmpty() || phoneContent.hasContent) {
+            Row(Modifier.align(Alignment.BottomStart).padding(start = 42.dp, end = 42.dp, bottom = 23.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
+                if (calendarEvents.isNotEmpty()) CalendarAgenda(calendarEvents, false, Modifier.weight(1f).height(140.dp), dimmed = true)
+                if (phoneContent.hasContent) PhoneListsCard(phoneContent, false, Modifier.weight(1f).height(140.dp), dimmed = true)
+            }
+        }
     }
 }
 
@@ -1579,12 +1603,12 @@ private fun CalendarAgenda(events: List<CalendarEvent>, glass: Boolean, modifier
     val shape = RoundedCornerShape(16.dp)
     val background = when {
         dimmed -> Modifier.clip(shape).background(Color(0x4420262D)).border(1.dp, Color(0x44565F69), shape)
-        glass -> Modifier.clip(shape).background(Brush.linearGradient(listOf(Color(0x22FFFFFF), Color(0x33404D5A), Color(0xCC101820)))).border(1.dp, Color(0x448E9AAA), shape)
+        glass -> Modifier.clip(shape).background(Brush.linearGradient(listOf(Color(0x44FFFFFF), Color(0x66404D5A), Color(0xDD101820)))).border(1.dp, Color(0x668E9AAA), shape)
         else -> Modifier.clip(shape).background(Color(0xAA0E1116))
     }
     val headingColor = if (dimmed) Color(0xFF747C85) else Color(0xFFE8C98C)
     val eventColor = if (dimmed) Color(0xFF818991) else Color.White
-    Column(modifier.widthIn(max = 320.dp).then(background).padding(horizontal = 10.dp, vertical = 7.dp)) {
+    Column(modifier.then(background).verticalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 7.dp)) {
         grouped.forEach { (label, items) ->
             Text(label, color = headingColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
             items.take(1).forEach { event ->
@@ -1599,6 +1623,35 @@ private fun CalendarAgenda(events: List<CalendarEvent>, glass: Boolean, modifier
                     val time = if (event.allDay) "" else java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(event.startsAt) + " · "
                     Text("$time${event.title}", color = eventColor, fontSize = 10.sp, maxLines = 1, modifier = Modifier.padding(start = 5.dp))
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PhoneListsCard(content: PhoneContent, glass: Boolean, modifier: Modifier = Modifier, dimmed: Boolean = false) {
+    val shape = RoundedCornerShape(16.dp)
+    val background = when {
+        dimmed -> Modifier.clip(shape).background(Color(0x4420262D)).border(1.dp, Color(0x44565F69), shape)
+        glass -> Modifier.clip(shape).background(Brush.linearGradient(listOf(Color(0x44FFFFFF), Color(0x66404D5A), Color(0xDD101820)))).border(1.dp, Color(0x668E9AAA), shape)
+        else -> Modifier.clip(shape).background(Color(0xAA0E1116))
+    }
+    val mainText = if (dimmed) Color(0xFF818991) else Color.White
+    val heading = if (dimmed) Color(0xFF747C85) else Color(0xFFE8C98C)
+    Column(modifier.then(background).verticalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 7.dp)) {
+        if (content.todos.isNotEmpty()) {
+            Text("Aufgaben", color = heading, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            content.todos.forEach { todo ->
+                Row(Modifier.padding(top = 3.dp), verticalAlignment = Alignment.Top) {
+                    Icon(if (todo.done) Icons.Default.CheckBox else Icons.Default.CheckBoxOutlineBlank, contentDescription = if (todo.done) "Erledigt" else "Offen", tint = mainText, modifier = Modifier.size(14.dp))
+                    Text(todo.text, color = mainText, fontSize = 10.sp, maxLines = 2, modifier = Modifier.padding(start = 5.dp))
+                }
+            }
+        }
+        if (content.notes.isNotEmpty()) {
+            Text("Notizen", color = heading, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = if (content.todos.isNotEmpty()) 6.dp else 0.dp))
+            content.notes.forEach { note ->
+                Text(note.text, color = mainText, fontSize = 10.sp, maxLines = 3, modifier = Modifier.padding(top = 3.dp))
             }
         }
     }
@@ -1619,6 +1672,33 @@ private fun imageScaleName(mode: String) = when (mode) { "fill" -> "Füllen"; "s
 private fun selectedAlbumLabel(images: List<String>, index: Int) = images.getOrNull(index)?.contains("upload-albums") == true
 
 private data class PhotoHistory(val addedAt: Long, val viewCount: Int, val lastViewedAt: Long)
+
+private data class PhoneNote(val text: String)
+private data class PhoneTodo(val text: String, val done: Boolean)
+private data class PhoneContent(val notes: List<PhoneNote> = emptyList(), val todos: List<PhoneTodo> = emptyList()) {
+    val hasContent: Boolean get() = notes.isNotEmpty() || todos.isNotEmpty()
+}
+
+private fun parsePhoneContent(raw: String?, legacyNote: String): PhoneContent = runCatching {
+    val json = JSONObject(raw ?: "{}")
+    val notes = json.optJSONArray("notes")
+    val todos = json.optJSONArray("todos")
+    PhoneContent(
+        notes = if (notes == null) emptyList() else (0 until notes.length()).mapNotNull { index -> notes.optJSONObject(index)?.optString("text")?.takeIf(String::isNotBlank)?.let(::PhoneNote) },
+        todos = if (todos == null) emptyList() else (0 until todos.length()).mapNotNull { index ->
+            todos.optJSONObject(index)?.let { item -> item.optString("text").takeIf(String::isNotBlank)?.let { PhoneTodo(it, item.optBoolean("done")) } }
+        }
+    )
+}.getOrElse {
+    PhoneContent(notes = legacyNote.lines().map(String::trim).filter(String::isNotBlank).map(::PhoneNote))
+}.let { parsed ->
+    if (!parsed.hasContent && legacyNote.isNotBlank()) PhoneContent(notes = legacyNote.lines().map(String::trim).filter(String::isNotBlank).map(::PhoneNote)) else parsed
+}
+
+private fun serializePhoneContent(content: PhoneContent): String = JSONObject()
+    .put("notes", org.json.JSONArray().apply { content.notes.forEach { put(JSONObject().put("text", it.text)) } })
+    .put("todos", org.json.JSONArray().apply { content.todos.forEach { put(JSONObject().put("text", it.text).put("done", it.done)) } })
+    .toString()
 
 private fun loadPhotoHistory(raw: String?): Map<String, PhotoHistory> = runCatching {
     val root = JSONObject(raw ?: "{}")
@@ -2087,29 +2167,17 @@ private fun InlineMessageDialog(message: String, onClose: () -> Unit) {
 
 @Composable
 private fun PersistentQrBadge(url: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    val shape = RoundedCornerShape(18.dp)
     val bitmap = remember(url) {
         runCatching {
             val matrix = QRCodeWriter().encode(url, BarcodeFormat.QR_CODE, 280, 280)
             android.graphics.Bitmap.createBitmap(280, 280, android.graphics.Bitmap.Config.ARGB_8888).apply {
-                for (x in 0 until 280) for (y in 0 until 280) setPixel(x, y, if (matrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
+                for (x in 0 until 280) for (y in 0 until 280) if (matrix[x, y]) setPixel(x, y, android.graphics.Color.BLACK)
             }.asImageBitmap()
         }.getOrNull()
     }
-    Column(
-        modifier.width(112.dp).clip(shape)
-            .background(Brush.linearGradient(listOf(Color(0x553E4D5E), Color(0xDD111820))))
-            .border(1.dp, Color(0x667F91A4), shape)
-            .clickable(onClick = onClick)
-            .padding(8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        if (bitmap != null) {
-            Image(bitmap, "Notiz oder Fotos hinzufügen", Modifier.size(84.dp).clip(RoundedCornerShape(8.dp)).background(Color.White).padding(4.dp))
-        } else {
-            Icon(Icons.Default.QrCode2, "Notiz oder Fotos hinzufügen", tint = Accent, modifier = Modifier.size(84.dp))
-        }
-        Text("Hinzufügen", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+    Box(modifier.clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+        if (bitmap != null) Image(bitmap, "Schwarzer QR-Code zum Hinzufügen von Notizen, Aufgaben oder Fotos", Modifier.fillMaxSize())
+        else Icon(Icons.Default.QrCode2, "Notizen, Aufgaben oder Fotos hinzufügen", tint = Color.Black, modifier = Modifier.fillMaxSize())
     }
 }
 
