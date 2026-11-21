@@ -9,7 +9,7 @@
         android:allowBackup="false"
         android:banner="@drawable/tv_banner"
         android:icon="@mipmap/app_icon"
-        android:label="Photo Carousel"
+        android:label="Stillframe"
         android:theme="@style/Theme.PhotoCarousel"
         android:usesCleartextTraffic="false">
         <receiver
@@ -24,7 +24,7 @@
             android:name=".MainActivity"
             android:banner="@drawable/tv_banner"
             android:icon="@mipmap/app_icon"
-            android:label="Photo Carousel"
+            android:label="Stillframe"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize"
             android:exported="true"
             android:screenOrientation="unspecified">

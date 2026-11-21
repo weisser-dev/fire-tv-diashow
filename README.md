@@ -8,12 +8,12 @@ Eine leichte Diashow für Android TV und Fire TV. Sie ist für Fernseher gedacht
 - **Handy-Upload:** QR-Code im selben WLAN öffnen, Bilder auswählen und in Alben auf dem Fernseher sortieren. Uploads bleiben lokal im privaten App-Speicher.
 - **Diashow:** Zufallswiedergabe, Bilddauer, Vor-/Zurück, Einpassen/Füllen/Strecken und fünf Übergänge: langsame Überblendung, weiche Überblendung, direkt, Gleiten und Zoom.
 - **Fernbedienung:** Mittlere Taste pausiert; das Kontextmenü verwaltet Bilder, Dauer, Übergang, Bilddarstellung, Alben und Schlaf-Timer. „Jetzt schlafen“ schaltet die Fotos aus; OK oder Zurück weckt die App wieder auf. Ein Wochenplan startet die Wiedergabe zum Beispiel Mo–Fr von 16:00 bis 21:00 Uhr und zeigt außerhalb dieser Zeit den Schlafbildschirm.
-- **Uhr und Wetter:** Im Schlafmodus optional Uhr, Datum und aktuelle Wetterdaten einblenden. Wetter-Ort über Land (ISO-Code) und Postleitzahl angeben, etwa `DE` und `10115`. Die Wetteranzeige nutzt öffentliche Daten von Open-Meteo. Zeitplan und Schlaf-Timer steuern den App-Bildschirm, sie wecken den Fire TV nicht aus einem ausgeschalteten oder tief schlafenden Systemzustand.
+- **Uhr, Datum und Wetter:** Optional über dem Foto oder im Schlafmodus anzeigen. Liquid-Glass-Optik ergänzt transparente Verläufe, Lichtkante und Schatten. Auf älteren Fire TVs bleibt der Effekt leichtgewichtig und verzichtet auf teuren Hintergrund-Blur. Wetter-Ort über Land (ISO-Code) und Postleitzahl angeben, etwa `DE` und `10115`. Die Wetteranzeige nutzt öffentliche Daten von Open-Meteo. Zeitplan und Schlaf-Timer steuern den App-Bildschirm, sie wecken den Fire TV nicht aus einem ausgeschalteten oder tief schlafenden Systemzustand.
 - **Ausrichtung:** Die App, Menüs und Fernbedienungsnavigation lassen sich gemeinsam um 0°, 90°, 180° oder 270° drehen.
 - **Dauerbetrieb:** Bildschirm während der Wiedergabe aktiv halten und App optional nach dem Fire-TV-Neustart öffnen.
 - **Updates:** Die App prüft GitHub Releases und bietet die aktuelle APK direkt zum Laden an.
 - **Ältere Fire TVs:** Mindestversion Android API 22 (Fire OS 5), inklusive klassischer APK-Signatur.
-- **Demo:** [Interaktive Vorschau](https://weisser-dev.github.io/fire-tv-diashow/) mit Bildformat, Übergängen, Schlafzustand, Uhr/Datum/Wetter und Fernbedienungs-Kontextmenü. Es werden keine Dateien über die Demo hochgeladen.
+- **Demo:** [Interaktive Vorschau](https://weisser-dev.github.io/fire-tv-diashow/) mit Bildformat, Übergängen, Schlafzustand, Uhr/Datum/Wetter, Liquid-Glass-Schalter und Fernbedienungs-Kontextmenü. Es werden keine Dateien über die Demo hochgeladen.
 
 ## Handy-Upload und lokale Alben
 

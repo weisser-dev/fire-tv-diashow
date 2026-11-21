@@ -147,12 +147,12 @@ class LocalPhotoUploadServer(
         }
         return """
         <!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-        <meta name="color-scheme" content="dark"><title>Fotos an Photo Carousel senden</title><style>
+        <meta name="color-scheme" content="dark"><title>Fotos an Stillframe senden</title><style>
         *{box-sizing:border-box}body{margin:0;min-height:100vh;background:#10141b;color:#f5f2eb;font:17px system-ui,sans-serif;padding:22px;display:grid;place-items:center}
         main{width:min(680px,100%);background:#1b222c;border:1px solid #394654;border-radius:22px;padding:26px}h1{font-size:27px;margin:0 0 8px}p{line-height:1.5;color:#cbd2db}
         label{display:block;margin:18px 0 8px;font-weight:650}input,button{font:inherit;width:100%;padding:14px;border-radius:12px}input{background:#10141b;color:#fff;border:1px solid #526070}input[type=file]{padding:12px}
         button{margin-top:18px;border:0;background:#e8c98c;color:#10141b;font-weight:750}button:disabled{opacity:.55}.status{min-height:2em;color:#42d9ff;white-space:pre-line}.note{font-size:13px;color:#9da8b6}
-        </style></head><body><main><h1>Fotos an Photo Carousel senden</h1>
+        </style></head><body><main><h1>Fotos an Stillframe senden</h1>
         <p>Wähle ein Album und Bilder aus. Die Fotos werden direkt über dein WLAN auf den Fernseher übertragen. Große Bilder werden vorher auf maximal 1920 × 1920 Pixel verkleinert und als JPEG komprimiert.</p>
         <label for="album">Album auf dem Fernseher</label><input id="album" list="album-options" value="Erinnerungen" maxlength="40" autocomplete="off" placeholder="Albumname eingeben oder auswählen"><datalist id="album-options">$knownAlbums</datalist>
         <p class="note">Ein vorhandener Albumname ergänzt dieses Album; ein neuer Name legt ein neues Album an.</p>

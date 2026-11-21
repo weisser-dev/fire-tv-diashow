@@ -46,8 +46,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
@@ -160,6 +162,7 @@ class MainActivity : ComponentActivity() {
             var sleepTimerMinutes by remember { mutableIntStateOf(prefs.getInt("sleep_timer_minutes", 0)) }
             var sleepDeadline by remember { mutableLongStateOf(0L) }
             var weatherEnabled by remember { mutableStateOf(prefs.getBoolean("show_weather", false)) }
+            var glassOverlay by remember { mutableStateOf(prefs.getBoolean("glass_overlay", false)) }
             var weatherCountry by remember { mutableStateOf(prefs.getString("weather_country", "DE") ?: "DE") }
             var weatherPostal by remember { mutableStateOf(prefs.getString("weather_postal", "") ?: "") }
             var weatherLabel by remember { mutableStateOf("") }
@@ -329,6 +332,7 @@ class MainActivity : ComponentActivity() {
                                         4 -> autoStartOnBoot = !autoStartOnBoot
                                         10 -> transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut", "slide", "zoom"), 1)
                                         11 -> imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch"), 1)
+                                        16 -> { glassOverlay = !glassOverlay; prefs.edit().putBoolean("glass_overlay", glassOverlay).apply() }
                                     }
                                     if (focusedSettingsNode == 3) prefs.edit().putInt("seconds", seconds).apply()
                                     if (focusedSettingsNode == 4) prefs.edit().putBoolean("auto_start_on_boot", autoStartOnBoot).apply()
@@ -342,6 +346,7 @@ class MainActivity : ComponentActivity() {
                                         4 -> autoStartOnBoot = !autoStartOnBoot
                                         10 -> transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut", "slide", "zoom"), -1)
                                         11 -> imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch"), -1)
+                                        16 -> { glassOverlay = !glassOverlay; prefs.edit().putBoolean("glass_overlay", glassOverlay).apply() }
                                     }
                                     if (focusedSettingsNode == 3) prefs.edit().putInt("seconds", seconds).apply()
                                     if (focusedSettingsNode == 4) prefs.edit().putBoolean("auto_start_on_boot", autoStartOnBoot).apply()
@@ -353,14 +358,15 @@ class MainActivity : ComponentActivity() {
                                     if (focusedSettingsNode == 9) { focusedSettingsNode = 10; return@settingsKeys true }
                                     if (focusedSettingsNode == 13) { focusedSettingsNode = 14; return@settingsKeys false }
                                     if (focusedSettingsNode == 14) { focusedSettingsNode = 15; return@settingsKeys false }
-                                    if (focusedSettingsNode == 15) return@settingsKeys true
+                                    if (focusedSettingsNode == 15) { focusedSettingsNode = 16; return@settingsKeys true }
+                                    if (focusedSettingsNode == 16) return@settingsKeys true
                                     focusedSettingsNode = if (portraitUi) {
-                                        (focusedSettingsNode + 1).coerceAtMost(15)
+                                        (focusedSettingsNode + 1).coerceAtMost(16)
                                     } else when (focusedSettingsNode) {
                                         0, 1 -> 2
                                         2 -> 3
                                         3 -> 4
-                                        else -> (focusedSettingsNode + 1).coerceAtMost(15)
+                                        else -> (focusedSettingsNode + 1).coerceAtMost(16)
                                     }
                                     true
                                 }
@@ -369,6 +375,7 @@ class MainActivity : ComponentActivity() {
                                     if (focusedSettingsNode == 8) { focusedSettingsNode = 7; return@settingsKeys true }
                                     if (focusedSettingsNode == 10) { focusedSettingsNode = 9; return@settingsKeys true }
                                     if (focusedSettingsNode == 11) { focusedSettingsNode = 10; return@settingsKeys true }
+                                    if (focusedSettingsNode == 16) { focusedSettingsNode = 15; return@settingsKeys true }
                                     if (focusedSettingsNode == 15) { focusedSettingsNode = 14; return@settingsKeys false }
                                     if (focusedSettingsNode == 14) { focusedSettingsNode = 13; return@settingsKeys false }
                                     if (focusedSettingsNode == 13) { focusedSettingsNode = 12; return@settingsKeys true }
@@ -397,6 +404,7 @@ class MainActivity : ComponentActivity() {
                                         11 -> imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch"), 1)
                                         12 -> { scheduleEnabled = !scheduleEnabled; prefs.edit().putBoolean("schedule_enabled", scheduleEnabled).apply() }
                                         13 -> { scheduleWeekdaysOnly = !scheduleWeekdaysOnly; prefs.edit().putBoolean("schedule_weekdays_only", scheduleWeekdaysOnly).apply() }
+                                        16 -> { glassOverlay = !glassOverlay; prefs.edit().putBoolean("glass_overlay", glassOverlay).apply() }
                                     }
                                     prefs.edit().putString("transition_style", transitionStyle).putString("image_scale_mode", imageScaleMode).apply()
                                     true
@@ -566,10 +574,10 @@ class MainActivity : ComponentActivity() {
                     ) {
                     val modalVisible = showSettings || message != null || !orientationChosen || uploadUrl != null || showPinSetup
                     if (sleeping) {
-                        SleepScreen(showClock, showDate, weatherEnabled, weatherLabel)
+                        SleepScreen(showClock, showDate, weatherEnabled, weatherLabel, glassOverlay)
                     } else if (playing && images.isNotEmpty()) {
                         PlaybackView(images, index, displayRotation, panZoom, seconds, playing, paused, imageScaleMode, transitionStyle, pauseMenuIndex, sleepTimerMinutes,
-                            showClock, showDate, weatherEnabled, weatherLabel,
+                            showClock, showDate, weatherEnabled, weatherLabel, glassOverlay,
                             onPause = { paused = true; pauseMenuIndex = 0 },
                             onNext = { index = (index + 1) % images.size }, onPrevious = { index = (index - 1 + images.size) % images.size },
                             onResume = { paused = false }, onAddImages = { startPhotoUpload() }, onAddFiles = { photoChooser.launch(arrayOf("image/*")) },
@@ -724,13 +732,14 @@ class MainActivity : ComponentActivity() {
                     if (showSettings) {
                         SettingsDialog(
                             seconds, panZoom, displayRotation, focusedSettingsNode, portraitUi, autoStartOnBoot,
-                            showClock, showDate, weatherEnabled, weatherCountry, weatherPostal, transitionStyle, imageScaleMode,
+                            showClock, showDate, weatherEnabled, weatherCountry, weatherPostal, transitionStyle, imageScaleMode, glassOverlay,
                             scheduleEnabled, scheduleWeekdaysOnly, scheduleStart, scheduleEnd,
                             onFocusedNode = { focusedSettingsNode = it },
                             onAutoStartOnBoot = { autoStartOnBoot = it; prefs.edit().putBoolean("auto_start_on_boot", it).apply() },
                             onShowClock = { showClock = it; prefs.edit().putBoolean("show_clock", it).apply() },
                             onShowDate = { showDate = it; prefs.edit().putBoolean("show_date", it).apply() },
                             onShowWeather = { weatherEnabled = it; prefs.edit().putBoolean("show_weather", it).apply() },
+                            onGlassOverlay = { glassOverlay = it; prefs.edit().putBoolean("glass_overlay", it).apply() },
                             onWeatherCountry = { weatherCountry = it.uppercase().take(2); prefs.edit().putString("weather_country", weatherCountry).apply() },
                             onWeatherPostal = { weatherPostal = it; prefs.edit().putString("weather_postal", it).apply() },
                             onTransitionStyle = { transitionStyle = it; prefs.edit().putString("transition_style", it).apply() },
@@ -852,7 +861,7 @@ class MainActivity : ComponentActivity() {
     private fun installUpdate(apk: File) {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
-                updateStatus = "Erlaube Photo Carousel die Installation unbekannter Apps und tippe erneut auf Installieren."
+                updateStatus = "Erlaube Stillframe die Installation unbekannter Apps und tippe erneut auf Installieren."
                 startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
                 return
             }
@@ -914,7 +923,7 @@ private fun EmptyState() {
 private fun PlaybackView(
     images: List<String>, index: Int, rotation: Int, panZoom: Boolean, seconds: Int, playing: Boolean,
     paused: Boolean, imageScaleMode: String, transitionStyle: String, pauseMenuIndex: Int, sleepTimerMinutes: Int,
-    showClock: Boolean, showDate: Boolean, showWeather: Boolean, weatherLabel: String,
+    showClock: Boolean, showDate: Boolean, showWeather: Boolean, weatherLabel: String, glassOverlay: Boolean,
     onPause: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onResume: () -> Unit,
     onAddImages: () -> Unit, onAddFiles: () -> Unit, onCycleSpeed: (Int) -> Unit,
     onCycleTransition: (Int) -> Unit, onCycleScale: (Int) -> Unit, onCycleSleepTimer: (Int) -> Unit,
@@ -963,7 +972,7 @@ private fun PlaybackView(
             )
         }
         if (showClock || showDate || showWeather && weatherLabel.isNotBlank()) {
-            TimeWeatherOverlay(showClock, showDate, showWeather, weatherLabel)
+            TimeWeatherOverlay(showClock, showDate, showWeather, weatherLabel, glassOverlay)
         }
         if (paused) {
             Box(Modifier.fillMaxSize().background(Color(0x66000000)), contentAlignment = Alignment.Center) {
@@ -1026,13 +1035,20 @@ private fun PlaybackView(
 }
 
 @Composable
-private fun TimeWeatherOverlay(showClock: Boolean, showDate: Boolean, showWeather: Boolean, weatherLabel: String) {
+private fun TimeWeatherOverlay(showClock: Boolean, showDate: Boolean, showWeather: Boolean, weatherLabel: String, glassOverlay: Boolean) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { delay(15_000); now = System.currentTimeMillis() } }
     val date = remember(now) { java.text.SimpleDateFormat("EEEE, d. MMMM", java.util.Locale.GERMANY).format(java.util.Date(now)) }
     val time = remember(now) { java.text.SimpleDateFormat("HH:mm", java.util.Locale.GERMANY).format(java.util.Date(now)) }
     Box(Modifier.fillMaxSize()) {
-        Column(Modifier.align(Alignment.TopEnd).padding(24.dp).clip(RoundedCornerShape(14.dp)).background(Color(0x990E1116)).padding(horizontal = 12.dp, vertical = 8.dp), horizontalAlignment = Alignment.End) {
+        val shape = RoundedCornerShape(18.dp)
+        val glassModifier = if (glassOverlay) Modifier
+            .shadow(16.dp, shape)
+            .clip(shape)
+            .background(Brush.linearGradient(listOf(Color(0x99FFFFFF), Color(0x553D536A), Color(0xAA141B25))))
+            .border(1.dp, Brush.linearGradient(listOf(Color(0xCCFFFFFF), Color(0x3383D8FF), Color(0x66FFFFFF))), shape)
+        else Modifier.clip(RoundedCornerShape(14.dp)).background(Color(0x990E1116))
+        Column(Modifier.align(Alignment.TopEnd).padding(24.dp).then(glassModifier).padding(horizontal = if (glassOverlay) 18.dp else 12.dp, vertical = if (glassOverlay) 12.dp else 8.dp), horizontalAlignment = Alignment.End) {
             if (showClock) Text(time, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Medium)
             if (showDate) Text(date, color = Color(0xFFE1E5EA), fontSize = 12.sp)
             if (showWeather && weatherLabel.isNotBlank()) Text(weatherLabel, color = Color(0xFFE1E5EA), fontSize = 12.sp)
@@ -1041,18 +1057,28 @@ private fun TimeWeatherOverlay(showClock: Boolean, showDate: Boolean, showWeathe
 }
 
 @Composable
-private fun SleepScreen(showClock: Boolean, showDate: Boolean, showWeather: Boolean, weatherLabel: String) {
+private fun SleepScreen(showClock: Boolean, showDate: Boolean, showWeather: Boolean, weatherLabel: String, glassOverlay: Boolean) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { delay(15_000); now = System.currentTimeMillis() } }
     val date = remember(now) { java.text.SimpleDateFormat("EEEE, d. MMMM", java.util.Locale.GERMANY).format(java.util.Date(now)) }
     val time = remember(now) { java.text.SimpleDateFormat("HH:mm", java.util.Locale.GERMANY).format(java.util.Date(now)) }
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         if (showClock || showDate || showWeather && weatherLabel.isNotBlank()) {
-            Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+            val shape = RoundedCornerShape(28.dp)
+            val glassModifier = if (glassOverlay) Modifier
+                .shadow(20.dp, shape)
+                .clip(shape)
+                .background(Brush.linearGradient(listOf(Color(0x66FFFFFF), Color(0x223D536A), Color(0x66141B25))))
+                .border(1.dp, Brush.linearGradient(listOf(Color(0xCCFFFFFF), Color(0x3383D8FF), Color(0x66FFFFFF))), shape)
+            else Modifier
+            Column(Modifier.align(Alignment.Center).then(glassModifier).padding(horizontal = if (glassOverlay) 38.dp else 0.dp, vertical = if (glassOverlay) 26.dp else 0.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 if (showClock) Text(time, color = Color.White, fontSize = 68.sp, fontWeight = FontWeight.Light)
                 if (showDate) Text(date, color = Color(0xFFB8C1CC), fontSize = 21.sp)
             }
-            if (showWeather && weatherLabel.isNotBlank()) Text(weatherLabel, color = Color(0xFFB8C1CC), fontSize = 16.sp, modifier = Modifier.align(Alignment.BottomEnd).padding(24.dp))
+            if (showWeather && weatherLabel.isNotBlank()) {
+                val weatherGlass = if (glassOverlay) Modifier.shadow(14.dp, RoundedCornerShape(18.dp)).clip(RoundedCornerShape(18.dp)).background(Brush.linearGradient(listOf(Color(0x99FFFFFF), Color(0x66141B25)))).border(1.dp, Color(0x88FFFFFF), RoundedCornerShape(18.dp)) else Modifier
+                Text(weatherLabel, color = Color(0xFFB8C1CC), fontSize = 16.sp, modifier = Modifier.align(Alignment.BottomEnd).padding(24.dp).then(weatherGlass).padding(horizontal = 16.dp, vertical = 10.dp))
+            }
         }
     }
 }
@@ -1085,6 +1111,7 @@ private fun SettingsDialog(
     weatherPostal: String,
     transitionStyle: String,
     imageScaleMode: String,
+    glassOverlay: Boolean,
     scheduleEnabled: Boolean,
     scheduleWeekdaysOnly: Boolean,
     scheduleStart: String,
@@ -1094,6 +1121,7 @@ private fun SettingsDialog(
     onShowClock: (Boolean) -> Unit,
     onShowDate: (Boolean) -> Unit,
     onShowWeather: (Boolean) -> Unit,
+    onGlassOverlay: (Boolean) -> Unit,
     onWeatherCountry: (String) -> Unit,
     onWeatherPostal: (String) -> Unit,
     onTransitionStyle: (String) -> Unit,
@@ -1113,7 +1141,7 @@ private fun SettingsDialog(
     val countryFocus = remember { FocusRequester() }
     val postalFocus = remember { FocusRequester() }
     LaunchedEffect(focusedSettingsNode) {
-        val position = (settingsScroll.maxValue * (focusedSettingsNode.coerceIn(0, 15) / 15f)).toInt()
+        val position = (settingsScroll.maxValue * (focusedSettingsNode.coerceIn(0, 16) / 16f)).toInt()
         runCatching { settingsScroll.animateScrollTo(position) }
         delay(50)
         runCatching {
@@ -1198,7 +1226,7 @@ private fun SettingsDialog(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("Beim Fire-TV-Start öffnen", fontWeight = FontWeight.SemiBold)
-                        Text("Photo Carousel nach dem Einschalten automatisch starten.", fontSize = 12.sp, color = Color.Gray)
+                        Text("Stillframe nach dem Einschalten automatisch starten.", fontSize = 12.sp, color = Color.Gray)
                     }
                     Switch(
                         checked = autoStartOnBoot,
@@ -1239,6 +1267,7 @@ private fun SettingsDialog(
                     modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(if (focusedSettingsNode == 13) RemoteFocusSurface else Color.Transparent).clickable { onScheduleDays(!scheduleWeekdaysOnly) }.padding(12.dp))
                 Text("Aktive Zeit", color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 10.dp))
                 Text("${if (scheduleWeekdaysOnly) "Mo–Fr" else "Jeden Tag"} ${scheduleStart.ifBlank { "16:00" }}–${scheduleEnd.ifBlank { "21:00" }} · außerhalb zeigt die App den Schlafbildschirm.", color = Color(0xFFB8C1CC), fontSize = 12.sp)
+                SettingsToggle("Liquid-Glass-Optik", "Leichtes Glas mit transparentem Verlauf und Lichtkante für Uhr, Datum und Wetter.", glassOverlay, 16, focusedSettingsNode, onGlassOverlay)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedTextField(value = scheduleStart, onValueChange = { value -> if (value.length <= 5 && value.all { it.isDigit() || it == ':' }) onScheduleStart(value) }, label = { Text("Von · HH:MM") }, singleLine = true,
                         modifier = Modifier.weight(1f).focusRequester(scheduleStartFocus).onFocusChanged { if (it.isFocused) onFocusedNode(14) }.then(if (focusedSettingsNode == 14) Modifier.border(3.dp, RemoteFocus, RoundedCornerShape(12.dp)) else Modifier))
