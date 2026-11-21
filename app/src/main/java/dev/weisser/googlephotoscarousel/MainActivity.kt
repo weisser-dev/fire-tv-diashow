@@ -640,29 +640,29 @@ class MainActivity : ComponentActivity() {
                                 KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
                                     val direction = if (code == KeyEvent.KEYCODE_DPAD_RIGHT) 1 else -1
                                     when (pauseMenuIndex) {
-                                        1 -> { shuffle = !shuffle; prefs.edit().putBoolean("shuffle", shuffle).apply() }
-                                        4 -> { seconds = (seconds + direction).coerceIn(5, 60); prefs.edit().putInt("seconds", seconds).apply() }
-                                        5 -> { motionSeconds = cycleValue(motionSeconds, listOf(15, 30, 45, 60), direction); prefs.edit().putInt("motion_seconds", motionSeconds).apply() }
-                                        6 -> { transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut", "slide", "zoom"), direction); prefs.edit().putString("transition_style", transitionStyle).apply() }
-                                        7 -> { imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch", "ken_burns"), direction); prefs.edit().putString("image_scale_mode", imageScaleMode).apply() }
-                                        8 -> { focusedAlbumIndex = (focusedAlbumIndex + direction).coerceIn(0, uploadAlbums.size); selectedUploadAlbum = if (focusedAlbumIndex == 0) "*" else uploadAlbums.getOrNull(focusedAlbumIndex - 1) ?: "*"; prefs.edit().putString("selected_upload_album", selectedUploadAlbum).apply() }
-                                        9 -> { sleepTimerMinutes = cycleValue(sleepTimerMinutes, listOf(0, 15, 30, 60), direction); prefs.edit().putInt("sleep_timer_minutes", sleepTimerMinutes).apply(); sleepDeadline = if (sleepTimerMinutes == 0) 0L else System.currentTimeMillis() + sleepTimerMinutes * 60_000L }
+                                        2 -> { shuffle = !shuffle; prefs.edit().putBoolean("shuffle", shuffle).apply() }
+                                        5 -> { seconds = (seconds + direction).coerceIn(5, 60); prefs.edit().putInt("seconds", seconds).apply() }
+                                        6 -> { motionSeconds = cycleValue(motionSeconds, listOf(15, 30, 45, 60), direction); prefs.edit().putInt("motion_seconds", motionSeconds).apply() }
+                                        7 -> { transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut", "slide", "zoom"), direction); prefs.edit().putString("transition_style", transitionStyle).apply() }
+                                        8 -> { imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch", "ken_burns"), direction); prefs.edit().putString("image_scale_mode", imageScaleMode).apply() }
+                                        9 -> { focusedAlbumIndex = (focusedAlbumIndex + direction).coerceIn(0, uploadAlbums.size); selectedUploadAlbum = if (focusedAlbumIndex == 0) "*" else uploadAlbums.getOrNull(focusedAlbumIndex - 1) ?: "*"; prefs.edit().putString("selected_upload_album", selectedUploadAlbum).apply() }
+                                        10 -> { sleepTimerMinutes = cycleValue(sleepTimerMinutes, listOf(0, 15, 30, 60), direction); prefs.edit().putInt("sleep_timer_minutes", sleepTimerMinutes).apply(); sleepDeadline = if (sleepTimerMinutes == 0) 0L else System.currentTimeMillis() + sleepTimerMinutes * 60_000L }
                                     }
                                     true
                                 }
                                 KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_SPACE -> {
                                     when (pauseMenuIndex) {
                                         0 -> paused = false
-                                        1 -> { shuffle = !shuffle; prefs.edit().putBoolean("shuffle", shuffle).apply() }
-                                        2 -> startPhotoUpload()
-                                        3 -> launchPhotoChooser()
-                                        4 -> seconds = if (seconds >= 60) 5 else seconds + 1
-                                        5 -> { motionSeconds = cycleValue(motionSeconds, listOf(15, 30, 45, 60), 1); prefs.edit().putInt("motion_seconds", motionSeconds).apply() }
-                                        6 -> transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut", "slide", "zoom"), 1)
-                                        7 -> imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch", "ken_burns"), 1)
-                                        8 -> { focusedAlbumIndex = (focusedAlbumIndex + 1).coerceIn(0, uploadAlbums.size); selectedUploadAlbum = if (focusedAlbumIndex == 0) "*" else uploadAlbums.getOrNull(focusedAlbumIndex - 1) ?: "*" }
-                                        9 -> { sleepTimerMinutes = cycleValue(sleepTimerMinutes, listOf(0, 15, 30, 60), 1); prefs.edit().putInt("sleep_timer_minutes", sleepTimerMinutes).apply(); sleepDeadline = if (sleepTimerMinutes == 0) 0L else System.currentTimeMillis() + sleepTimerMinutes * 60_000L }
-                                        10 -> { sleeping = true; manualSleepOverride = true; playing = false; paused = false; sleepDeadline = 0L }
+                                        1 -> { sleeping = true; manualSleepOverride = true; playing = false; paused = false; sleepDeadline = 0L }
+                                        2 -> { shuffle = !shuffle; prefs.edit().putBoolean("shuffle", shuffle).apply() }
+                                        3 -> startPhotoUpload()
+                                        4 -> launchPhotoChooser()
+                                        5 -> seconds = if (seconds >= 60) 5 else seconds + 1
+                                        6 -> { motionSeconds = cycleValue(motionSeconds, listOf(15, 30, 45, 60), 1); prefs.edit().putInt("motion_seconds", motionSeconds).apply() }
+                                        7 -> transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut", "slide", "zoom"), 1)
+                                        8 -> imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch", "ken_burns"), 1)
+                                        9 -> { focusedAlbumIndex = (focusedAlbumIndex + 1).coerceIn(0, uploadAlbums.size); selectedUploadAlbum = if (focusedAlbumIndex == 0) "*" else uploadAlbums.getOrNull(focusedAlbumIndex - 1) ?: "*" }
+                                        10 -> { sleepTimerMinutes = cycleValue(sleepTimerMinutes, listOf(0, 15, 30, 60), 1); prefs.edit().putInt("sleep_timer_minutes", sleepTimerMinutes).apply(); sleepDeadline = if (sleepTimerMinutes == 0) 0L else System.currentTimeMillis() + sleepTimerMinutes * 60_000L }
                                         11 -> { playing = false; paused = false; sleepDeadline = 0L }
                                     }
                                     prefs.edit().putInt("seconds", seconds).putString("transition_style", transitionStyle).putString("image_scale_mode", imageScaleMode).putString("selected_upload_album", selectedUploadAlbum).apply()
@@ -1403,6 +1403,7 @@ private fun PlaybackView(
                         Text("Mittlere Taste: Auswahl öffnen", color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 5.dp, bottom = 16.dp))
                         val options = listOf(
                             "Fortsetzen" to "Weiterblättern",
+                            "Jetzt schlafen" to "Bildschirm wird schwarz; OK oder Zurück weckt auf",
                             "Shuffle · ${if (shuffle) "An" else "Aus"}" to "Zufällig; neue Bilder bekommen Vorrang",
                             "Bilder per QR hinzufügen" to "Handy-Upload im WLAN",
                             "Dateien hinzufügen" to "Bilder auf diesem Gerät wählen",
@@ -1412,7 +1413,6 @@ private fun PlaybackView(
                             "Bilddarstellung · ${imageScaleName(imageScaleMode)}" to "Einpassen, Füllen, Strecken oder Ken-Burns-Bewegung",
                             "Album · ${if (selectedAlbumLabel(images, index)) "Auswahl" else "Alle Bilder"}" to "Album im Hauptmenü wechseln",
                             "Schlaf-Timer · ${if (sleepTimerMinutes == 0) "Aus" else "$sleepTimerMinutes Min."}" to "Links/rechts stellt 15, 30 oder 60 Minuten ein",
-                            "Jetzt schlafen" to "Bildschirm wird schwarz; OK oder Zurück weckt auf",
                             "Zur Übersicht" to "Diashow beenden"
                         )
                         options.forEachIndexed { optionIndex, option ->
@@ -1425,15 +1425,15 @@ private fun PlaybackView(
                                 onClick = {
                                     when (optionIndex) {
                                         0 -> onResume()
-                                        1 -> onToggleShuffle()
-                                        2 -> onAddImages()
-                                        3 -> onAddFiles()
-                                        4 -> onCycleSpeed(1)
-                                        5 -> onCycleMotionDuration(1)
-                                        6 -> onCycleTransition(1)
-                                        7 -> onCycleScale(1)
-                                        9 -> onCycleSleepTimer(1)
-                                        10 -> onSleepNow()
+                                        1 -> onSleepNow()
+                                        2 -> onToggleShuffle()
+                                        3 -> onAddImages()
+                                        4 -> onAddFiles()
+                                        5 -> onCycleSpeed(1)
+                                        6 -> onCycleMotionDuration(1)
+                                        7 -> onCycleTransition(1)
+                                        8 -> onCycleScale(1)
+                                        10 -> onCycleSleepTimer(1)
                                         11 -> onExit()
                                     }
                                 }
@@ -1465,7 +1465,7 @@ private fun TimeWeatherOverlay(showClock: Boolean, showDate: Boolean, showWeathe
     LaunchedEffect(Unit) { while (true) { delay(15_000); now = System.currentTimeMillis() } }
     val date = remember(now) { java.text.SimpleDateFormat("EEEE, d. MMMM", java.util.Locale.getDefault()).format(java.util.Date(now)) }
     val time = remember(now) { java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(now)) }
-    Box(Modifier.fillMaxSize()) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
         val shape = RoundedCornerShape(18.dp)
         // Keep the glass treatment to one quiet outline; stacked gradients looked like a second bar on TV.
         val glassModifier = if (glassOverlay) Modifier
@@ -1481,7 +1481,10 @@ private fun TimeWeatherOverlay(showClock: Boolean, showDate: Boolean, showWeathe
                 if (showWeather && weatherLabel.isNotBlank()) Text(weatherLabel, color = Color(0xFFE1E5EA), fontSize = 12.sp)
             }
         }
-        if (calendarEvents.isNotEmpty()) CalendarAgenda(calendarEvents, glassOverlay, Modifier.align(Alignment.BottomEnd).padding((imagePaddingDp + 20).dp))
+        if (calendarEvents.isNotEmpty()) {
+            val inset = (imagePaddingDp + 42).dp
+            CalendarAgenda(calendarEvents, glassOverlay, Modifier.align(Alignment.BottomStart).padding(start = inset, bottom = (imagePaddingDp + 20).dp).widthIn(max = ((maxWidth - inset * 2) / 2).coerceAtLeast(120.dp)))
+        }
         if (noteText.isNotBlank()) NoteCard(noteText, glassOverlay, Modifier.align(Alignment.BottomStart).padding((imagePaddingDp + 20).dp))
     }
 }
@@ -1492,10 +1495,10 @@ private fun SleepScreen(showClock: Boolean, showDate: Boolean, showWeather: Bool
     LaunchedEffect(Unit) { while (true) { delay(15_000); now = System.currentTimeMillis() } }
     val date = remember(now) { java.text.SimpleDateFormat("EEEE, d. MMMM", java.util.Locale.getDefault()).format(java.util.Date(now)) }
     val time = remember(now) { java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(now)) }
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
+    BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black)) {
         if (showClock || showDate || showWeather && weatherLabel.isNotBlank()) {
-            // Sleep mode stays visually dark; don't draw the glass outline or its blue highlight.
-            Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+            // Sleep mode stays visually dark; place the clock above center to leave room for the agenda.
+            Column(Modifier.align(Alignment.Center).offset(y = -(maxHeight * 0.14f)), horizontalAlignment = Alignment.CenterHorizontally) {
                 if (showClock) Text(time, color = Color(0xFF686D75), fontSize = 68.sp, fontWeight = FontWeight.Normal)
                 if (showDate) Text(date, color = Color(0xFF555B63), fontSize = 19.sp)
                 if (showWeather && weatherLabel.isNotBlank()) {
@@ -1506,7 +1509,7 @@ private fun SleepScreen(showClock: Boolean, showDate: Boolean, showWeather: Bool
                 }
             }
         }
-        if (calendarEvents.isNotEmpty()) CalendarAgenda(calendarEvents, glassOverlay, Modifier.align(Alignment.BottomCenter).padding(18.dp))
+        if (calendarEvents.isNotEmpty()) CalendarAgenda(calendarEvents, false, Modifier.align(Alignment.BottomStart).padding(start = 42.dp, bottom = 18.dp).widthIn(max = maxWidth / 2), dimmed = true)
         if (noteText.isNotBlank()) NoteCard(noteText, false, Modifier.align(Alignment.BottomStart).padding(18.dp))
     }
 }
@@ -1520,7 +1523,7 @@ private fun NoteCard(text: String, glass: Boolean, modifier: Modifier = Modifier
 }
 
 @Composable
-private fun CalendarAgenda(events: List<CalendarEvent>, glass: Boolean, modifier: Modifier = Modifier) {
+private fun CalendarAgenda(events: List<CalendarEvent>, glass: Boolean, modifier: Modifier = Modifier, dimmed: Boolean = false) {
     val zone = java.util.TimeZone.getDefault()
     val todayDate = java.util.Date()
     val today = dayKey(todayDate, zone)
@@ -1532,21 +1535,27 @@ private fun CalendarAgenda(events: List<CalendarEvent>, glass: Boolean, modifier
     ).filter { it.second.isNotEmpty() }
     if (grouped.isEmpty()) return
     val shape = RoundedCornerShape(16.dp)
-    val background = if (glass) Modifier.clip(shape).background(Brush.linearGradient(listOf(Color(0x55FFFFFF), Color(0x443D536A), Color(0xAA141B25)))).border(1.dp, Color(0x66FFFFFF), shape)
-        else Modifier.clip(shape).background(Color(0xAA0E1116))
-    Column(modifier.widthIn(max = 320.dp).then(background).padding(horizontal = 14.dp, vertical = 10.dp)) {
+    val background = when {
+        dimmed -> Modifier.clip(shape).background(Color(0x4420262D)).border(1.dp, Color(0x44565F69), shape)
+        glass -> Modifier.clip(shape).background(Brush.linearGradient(listOf(Color(0x55FFFFFF), Color(0x443D536A), Color(0xAA141B25)))).border(1.dp, Color(0x66FFFFFF), shape)
+        else -> Modifier.clip(shape).background(Color(0xAA0E1116))
+    }
+    val headingColor = if (dimmed) Color(0xFF747C85) else Color(0xFFE8C98C)
+    val eventColor = if (dimmed) Color(0xFF818991) else Color.White
+    Column(modifier.widthIn(max = 320.dp).then(background).padding(horizontal = 10.dp, vertical = 7.dp)) {
         grouped.forEach { (label, items) ->
-            Text(label, color = Color(0xFFE8C98C), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            items.take(2).forEach { event ->
-                Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(label, color = headingColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            items.take(1).forEach { event ->
+                Row(Modifier.padding(top = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                    val normalTint = if (dimmed) Color(0xFF777F88) else Color(0xFFE0E5EB)
                     val (icon, tint, description) = when (event.kind) {
-                        CalendarEventKind.BIRTHDAY -> Triple(Icons.Default.Cake, Color(0xFFFFD27A), "Geburtstag")
-                        CalendarEventKind.GARBAGE -> Triple(Icons.Default.DeleteOutline, Color(0xFFB9D4E8), "Müllabfuhr")
-                        else -> Triple(Icons.Default.Event, Color(0xFFE0E5EB), "Termin")
+                        CalendarEventKind.BIRTHDAY -> Triple(Icons.Default.Cake, if (dimmed) Color(0xFF85817A) else Color(0xFFFFD27A), "Geburtstag")
+                        CalendarEventKind.GARBAGE -> Triple(Icons.Default.DeleteOutline, if (dimmed) Color(0xFF777F88) else Color(0xFFB9D4E8), "Müllabfuhr")
+                        else -> Triple(Icons.Default.Event, normalTint, "Termin")
                     }
-                    Icon(icon, contentDescription = description, tint = tint, modifier = Modifier.size(16.dp))
-                    val time = if (event.allDay) "Ganztägig" else java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(event.startsAt)
-                    Text("$time · ${event.title}", color = Color.White, fontSize = 12.sp, maxLines = 1, modifier = Modifier.padding(start = 6.dp))
+                    Icon(icon, contentDescription = description, tint = tint, modifier = Modifier.size(14.dp))
+                    val time = if (event.allDay) "" else java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(event.startsAt) + " · "
+                    Text("$time${event.title}", color = eventColor, fontSize = 10.sp, maxLines = 1, modifier = Modifier.padding(start = 5.dp))
                 }
             }
         }
