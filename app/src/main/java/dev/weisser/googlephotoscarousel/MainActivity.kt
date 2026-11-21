@@ -251,11 +251,13 @@ class MainActivity : ComponentActivity() {
             val clearPhotosFocusRequester = remember { FocusRequester() }
             val managePhotosFocusRequester = remember { FocusRequester() }
             val updateCheckFocusRequester = remember { FocusRequester() }
+            val updateBannerFocusRequester = remember { FocusRequester() }
             var playButtonFocused by remember { mutableStateOf(false) }
             var sortButtonFocused by remember { mutableStateOf(false) }
             var managePhotosButtonFocused by remember { mutableStateOf(false) }
             var settingsButtonFocused by remember { mutableStateOf(false) }
             var updateCheckFocused by remember { mutableStateOf(false) }
+            var updateBannerFocused by remember { mutableStateOf(false) }
             val uploadAlbums = uploadedPhotos.map { it.album }.distinct().sorted()
             val selectedUploads = uploadedPhotos
                 .filter { selectedUploadAlbum == "*" || it.album == selectedUploadAlbum }
@@ -284,7 +286,7 @@ class MainActivity : ComponentActivity() {
                 playing && paused -> "pause-menu:$pauseMenuIndex"
                 playing -> "slideshow:$index/${images.size}"
                 mainFocusNode == 5 -> "photos:$photoManagerTarget:$focusedPhotoIndex/${images.size}"
-                else -> when (mainFocusNode) { 0 -> "settings-button"; 1 -> "files-source"; 2 -> "phone-upload"; 3 -> "album-filter:$focusedAlbumIndex"; 4 -> "sort-order"; 6 -> "play"; 7 -> "update"; else -> "main:$mainFocusNode" }
+                else -> when (mainFocusNode) { 0 -> "settings-button"; 1 -> "files-source"; 2 -> "phone-upload"; 3 -> "album-filter:$focusedAlbumIndex"; 4 -> "sort-order"; 6 -> "play"; 7 -> "update-check"; 8 -> "update-install"; else -> "main:$mainFocusNode" }
             }
             SideEffect {
                 remoteDebugRotation = displayRotation
@@ -347,7 +349,7 @@ class MainActivity : ComponentActivity() {
             MaterialTheme(colorScheme = darkColorScheme(primary = Accent, background = Ink, surface = SurfaceCard, onBackground = Color.White, onSurface = Color.White)) {
                 fun focusMainNode(node: Int) {
                     mainFocusNode = node
-                    if (node in 1..7) focusRestoreNode = node
+                    if (node in 1..8) focusRestoreNode = node
                     runCatching {
                         when (node) {
                             0 -> settingsFocusRequester.requestFocus()
@@ -357,6 +359,7 @@ class MainActivity : ComponentActivity() {
                             5 -> { photoManagerTarget = "manage"; managePhotosFocusRequester.requestFocus() }
                             6 -> playFocusRequester.requestFocus()
                             7 -> updateCheckFocusRequester.requestFocus()
+                            8 -> updateBannerFocusRequester.requestFocus()
                         }
                     }
                 }
@@ -368,8 +371,10 @@ class MainActivity : ComponentActivity() {
                     if (code !in setOf(KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT)) return false
                     val photoNode = if (images.isNotEmpty()) 5 else 7
                     val albumNode = if (uploadAlbums.isNotEmpty()) 3 else photoNode
+                    val firstContentNode = if (updateRelease != null && !updateBusy) 8 else 1
                     val next = if (portraitUi) when (from) {
-                        0 -> if (code == KeyEvent.KEYCODE_DPAD_DOWN) 1 else null
+                        0 -> if (code == KeyEvent.KEYCODE_DPAD_DOWN) firstContentNode else null
+                        8 -> when (code) { KeyEvent.KEYCODE_DPAD_UP -> 0; KeyEvent.KEYCODE_DPAD_DOWN -> 1; else -> null }
                         1 -> when (code) { KeyEvent.KEYCODE_DPAD_UP -> 0; KeyEvent.KEYCODE_DPAD_DOWN -> 2; else -> null }
                         2 -> when (code) { KeyEvent.KEYCODE_DPAD_UP -> 1; KeyEvent.KEYCODE_DPAD_DOWN -> albumNode; else -> null }
                         3 -> when (code) { KeyEvent.KEYCODE_DPAD_UP -> 2; KeyEvent.KEYCODE_DPAD_DOWN -> 4; else -> null }
@@ -379,7 +384,8 @@ class MainActivity : ComponentActivity() {
                         7 -> if (code == KeyEvent.KEYCODE_DPAD_UP) if (images.isNotEmpty()) 6 else if (uploadAlbums.isNotEmpty()) 4 else 2 else null
                         else -> null
                     } else when (from) {
-                        0 -> if (code == KeyEvent.KEYCODE_DPAD_DOWN) 1 else null
+                        0 -> if (code == KeyEvent.KEYCODE_DPAD_DOWN) firstContentNode else null
+                        8 -> when (code) { KeyEvent.KEYCODE_DPAD_UP -> 0; KeyEvent.KEYCODE_DPAD_DOWN -> 1; else -> null }
                         1 -> when (code) { KeyEvent.KEYCODE_DPAD_RIGHT -> 2; KeyEvent.KEYCODE_DPAD_UP -> 0; KeyEvent.KEYCODE_DPAD_DOWN -> albumNode; else -> null }
                         2 -> when (code) { KeyEvent.KEYCODE_DPAD_LEFT -> 1; KeyEvent.KEYCODE_DPAD_UP -> 0; KeyEvent.KEYCODE_DPAD_DOWN -> albumNode; else -> null }
                         3 -> when (code) { KeyEvent.KEYCODE_DPAD_UP -> 2; KeyEvent.KEYCODE_DPAD_DOWN -> 4; else -> null }
@@ -528,7 +534,7 @@ class MainActivity : ComponentActivity() {
                                 else -> false
                             }
                         }
-                        orientationChosen && !playing && mainFocusNode in 0..7 -> mainKeys@{ code ->
+                        orientationChosen && !playing && mainFocusNode in 0..8 -> mainKeys@{ code ->
                             when (code) {
                                 KeyEvent.KEYCODE_DPAD_UP -> if (mainFocusNode == 5) {
                                     when (photoManagerTarget) {
@@ -587,6 +593,7 @@ class MainActivity : ComponentActivity() {
                                         5 -> { /* Photo manager is handled above. */ }
                                         6 -> if (images.isNotEmpty()) { playing = true; paused = false } else message = "Füge zuerst Bilder hinzu."
                                         7 -> if (updateRelease != null) downloadOrInstallUpdate() else checkForUpdates(force = true)
+                                        8 -> downloadOrInstallUpdate()
                                     }
                                     true
                                 }
@@ -787,7 +794,17 @@ class MainActivity : ComponentActivity() {
                                         if (updateBusy) Text("Update wird geladen …", color = Color(0xFFB8C1CC), fontSize = 12.sp)
                                     }
                                     if (!updateBusy && updateRelease != null) {
-                                        Button(onClick = { downloadOrInstallUpdate() }, colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Ink)) {
+                                        Button(
+                                            onClick = { downloadOrInstallUpdate() },
+                                            modifier = Modifier.focusRequester(updateBannerFocusRequester)
+                                                .onFocusChanged {
+                                                    updateBannerFocused = it.isFocused
+                                                    if (it.isFocused) { mainFocusNode = 8; focusRestoreNode = 8 }
+                                                    else if (mainFocusNode == 8) mainFocusNode = -1
+                                                }
+                                                .then(if (updateBannerFocused) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(24.dp)) else Modifier),
+                                            colors = ButtonDefaults.buttonColors(containerColor = if (updateBannerFocused) RemoteFocusSurface else Accent, contentColor = if (updateBannerFocused) Color.White else Ink)
+                                        ) {
                                             Text(if (downloadedUpdate == null) "Update" else "Installieren")
                                         }
                                     }
