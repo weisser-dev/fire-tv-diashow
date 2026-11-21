@@ -1559,24 +1559,29 @@ private fun SleepScreen(showClock: Boolean, showDate: Boolean, showWeather: Bool
     val date = remember(now) { java.text.SimpleDateFormat("EEEE, d. MMMM", java.util.Locale.getDefault()).format(java.util.Date(now)) }
     val time = remember(now) { java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(now)) }
     BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black)) {
-        if (showClock || showDate || showWeather && weatherLabel.isNotBlank()) {
-            // Sleep mode stays visually dark; place the clock above center to leave room for the agenda.
-            Column(Modifier.align(Alignment.Center).offset(y = -(maxHeight * 0.14f)), horizontalAlignment = Alignment.CenterHorizontally) {
-                if (showClock) Text(time, color = Color(0xFF686D75), fontSize = 68.sp, fontWeight = FontWeight.Normal)
-                if (showDate) Text(date, color = Color(0xFF555B63), fontSize = 19.sp)
-                if (showWeather && weatherLabel.isNotBlank()) {
-                    Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
-                        Icon(Icons.Default.Cloud, contentDescription = "Wetter", tint = Color(0xFF555B63), modifier = Modifier.size(19.dp).padding(end = 3.dp))
-                        Text(weatherLabel, color = Color(0xFF555B63), fontSize = 19.sp)
-                    }
+        Column(
+            Modifier.align(Alignment.Center).fillMaxWidth().heightIn(max = maxHeight).verticalScroll(rememberScrollState()).padding(horizontal = 42.dp, vertical = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            if (uploadUrl != null) PersistentQrBadge(uploadUrl, Modifier.size(32.dp), onOpenUploadQr, dotColor = android.graphics.Color.rgb(112, 118, 126))
+            if (showClock) Text(time, color = Color(0xFF686D75), fontSize = 68.sp, fontWeight = FontWeight.Normal, modifier = Modifier.padding(top = 4.dp))
+            if (showDate) Text(date, color = Color(0xFF555B63), fontSize = 19.sp)
+            if (showWeather && weatherLabel.isNotBlank()) {
+                Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                    Icon(Icons.Default.Cloud, contentDescription = "Wetter", tint = Color(0xFF555B63), modifier = Modifier.size(19.dp).padding(end = 3.dp))
+                    Text(weatherLabel, color = Color(0xFF555B63), fontSize = 19.sp)
                 }
             }
-        }
-        if (uploadUrl != null) PersistentQrBadge(uploadUrl, Modifier.align(Alignment.TopEnd).padding(20.dp).size(58.dp), onOpenUploadQr)
-        if (calendarEvents.isNotEmpty() || phoneContent.hasContent) {
-            Row(Modifier.align(Alignment.BottomStart).padding(start = 42.dp, end = 42.dp, bottom = 23.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
-                if (calendarEvents.isNotEmpty()) CalendarAgenda(calendarEvents, false, Modifier.weight(1f).height(140.dp), dimmed = true)
-                if (phoneContent.hasContent) PhoneListsCard(phoneContent, false, Modifier.weight(1f).height(140.dp), dimmed = true)
+            if (calendarEvents.isNotEmpty()) {
+                CalendarAgenda(calendarEvents, false, Modifier.padding(top = 14.dp).fillMaxWidth(0.72f).heightIn(max = 140.dp), dimmed = true)
+            }
+            if (phoneContent.todos.isNotEmpty()) {
+                PhoneSectionCard("Aufgaben", phoneContent.todos.map { (if (it.done) "☑ " else "□ ") + it.text }, false,
+                    Modifier.padding(top = 10.dp).fillMaxWidth(0.72f).heightIn(max = 110.dp), dimmed = true)
+            }
+            if (phoneContent.notes.isNotEmpty()) {
+                PhoneSectionCard("Notizen", phoneContent.notes.map { it.text }, false,
+                    Modifier.padding(top = 10.dp).fillMaxWidth(0.72f).heightIn(max = 140.dp), dimmed = true)
             }
         }
     }
@@ -1656,6 +1661,20 @@ private fun PhoneListsCard(content: PhoneContent, glass: Boolean, modifier: Modi
                 Text(note.text, color = mainText, fontSize = 10.sp, maxLines = 3, modifier = Modifier.padding(top = 3.dp))
             }
         }
+    }
+}
+
+@Composable
+private fun PhoneSectionCard(title: String, rows: List<String>, glass: Boolean, modifier: Modifier = Modifier, dimmed: Boolean = false) {
+    val shape = RoundedCornerShape(16.dp)
+    val background = when {
+        dimmed -> Modifier.clip(shape).background(Color(0x4420262D)).border(1.dp, Color(0x44565F69), shape)
+        glass -> Modifier.clip(shape).background(Brush.linearGradient(listOf(Color(0x44FFFFFF), Color(0x66404D5A), Color(0xDD101820)))).border(1.dp, Color(0x668E9AAA), shape)
+        else -> Modifier.clip(shape).background(Color(0xAA0E1116))
+    }
+    Column(modifier.then(background).verticalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 7.dp)) {
+        Text(title, color = if (dimmed) Color(0xFF747C85) else Color(0xFFE8C98C), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        rows.forEach { row -> Text(row, color = if (dimmed) Color(0xFF818991) else Color.White, fontSize = 10.sp, maxLines = 2, modifier = Modifier.padding(top = 4.dp)) }
     }
 }
 
@@ -2168,12 +2187,12 @@ private fun InlineMessageDialog(message: String, onClose: () -> Unit) {
 }
 
 @Composable
-private fun PersistentQrBadge(url: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+private fun PersistentQrBadge(url: String, modifier: Modifier = Modifier, onClick: () -> Unit, dotColor: Int = android.graphics.Color.BLACK) {
     val bitmap = remember(url) {
         runCatching {
             val matrix = QRCodeWriter().encode(url, BarcodeFormat.QR_CODE, 280, 280)
             android.graphics.Bitmap.createBitmap(280, 280, android.graphics.Bitmap.Config.ARGB_8888).apply {
-                for (x in 0 until 280) for (y in 0 until 280) if (matrix[x, y]) setPixel(x, y, android.graphics.Color.BLACK)
+                for (x in 0 until 280) for (y in 0 until 280) if (matrix[x, y]) setPixel(x, y, dotColor)
             }.asImageBitmap()
         }.getOrNull()
     }
