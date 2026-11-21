@@ -252,6 +252,8 @@ internal class GpuSlideshowView @JvmOverloads constructor(
         private var nextHeight = 1
         private var transitionStart = 0L
         private var transitionDuration = 1000L
+        private var transitionMotionEnabled = false
+        private var transitionMotionProgress = 0f
         private var transitioningModel: String? = null
         private var completion: ((Int, Int) -> Unit)? = null
         private var scaleMode = "fit"
@@ -343,8 +345,13 @@ internal class GpuSlideshowView @JvmOverloads constructor(
         }
 
         private fun beginTransition(durationMs: Int) {
+            val now = System.nanoTime()
+            transitionMotionEnabled = motion && currentTexture != 0
+            transitionMotionProgress = if (transitionMotionEnabled) {
+                ((now - movementStart).toDouble() / (movementDuration * 1_000_000.0)).toFloat().coerceIn(0f, 1f)
+            } else 0f
             transitionDuration = durationMs.coerceAtLeast(1).toLong()
-            transitionStart = System.nanoTime()
+            transitionStart = now
             animate = true
             dirty = true
         }
@@ -459,10 +466,15 @@ internal class GpuSlideshowView @JvmOverloads constructor(
             val inTransition = transitionStart > 0L && nextTexture != 0
             val progress = if (inTransition) ((now - transitionStart).toDouble() / (transitionDuration * 1_000_000.0)).toFloat().coerceIn(0f, 1f) else 0f
             GLES20.glUniform1f(GLES20.glGetUniformLocation(shader, "uProgress"), progress)
-            val motionProgress = if (motion && !inTransition) ((now - movementStart).toDouble() / (movementDuration * 1_000_000.0)).toFloat().coerceIn(0f, 1f) else 0f
-            GLES20.glUniform1f(GLES20.glGetUniformLocation(shader, "uMotion"), if (motion && !inTransition) 1.0f + 0.045f * motionProgress else 1f)
-            GLES20.glUniform1f(GLES20.glGetUniformLocation(shader, "uMotionProgress"), motionProgress)
-            GLES20.glUniform1f(GLES20.glGetUniformLocation(shader, "uMoving"), if (motion && !inTransition) 1f else 0f)
+            val outgoingMotion = if (inTransition) transitionMotionEnabled else motion
+            val outgoingProgress = if (inTransition) transitionMotionProgress else if (motion) ((now - movementStart).toDouble() / (movementDuration * 1_000_000.0)).toFloat().coerceIn(0f, 1f) else 0f
+            val incomingMotion = inTransition && transitionMotionEnabled
+            GLES20.glUniform1f(GLES20.glGetUniformLocation(shader, "uMotionA"), if (outgoingMotion) 1.0f + 0.045f * outgoingProgress else 1f)
+            GLES20.glUniform1f(GLES20.glGetUniformLocation(shader, "uMotionProgressA"), outgoingProgress)
+            GLES20.glUniform1f(GLES20.glGetUniformLocation(shader, "uMovingA"), if (outgoingMotion) 1f else 0f)
+            GLES20.glUniform1f(GLES20.glGetUniformLocation(shader, "uMotionB"), 1f)
+            GLES20.glUniform1f(GLES20.glGetUniformLocation(shader, "uMotionProgressB"), 0f)
+            GLES20.glUniform1f(GLES20.glGetUniformLocation(shader, "uMovingB"), if (incomingMotion) 1f else 0f)
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
             GLES20.glDisableVertexAttribArray(position)
             GLES20.glDisableVertexAttribArray(texCoord)
@@ -523,10 +535,13 @@ internal class GpuSlideshowView @JvmOverloads constructor(
             uniform vec2 uViewport;
             uniform int uMode;
             uniform float uProgress;
-            uniform float uMotion;
-            uniform float uMotionProgress;
-            uniform float uMoving;
-            vec2 mapUv(vec2 uv, vec2 size, float motionScale, bool moving) {
+            uniform float uMotionA;
+            uniform float uMotionProgressA;
+            uniform float uMovingA;
+            uniform float uMotionB;
+            uniform float uMotionProgressB;
+            uniform float uMovingB;
+            vec2 mapUv(vec2 uv, vec2 size, float motionScale, bool moving, float motionProgress) {
                 float imageAspect = size.x / size.y;
                 float viewAspect = uViewport.x / uViewport.y;
                 vec2 crop = vec2(1.0);
@@ -541,8 +556,8 @@ internal class GpuSlideshowView @JvmOverloads constructor(
                 }
                 vec2 offset = vec2(0.0);
                 if (moving) {
-                    float travel = (uMotionProgress - 0.5) * (1.0 - crop.x);
-                    float travelY = (uMotionProgress - 0.5) * (1.0 - crop.y);
+                    float travel = (motionProgress - 0.5) * (1.0 - crop.x);
+                    float travelY = (motionProgress - 0.5) * (1.0 - crop.y);
                     if (imageAspect >= viewAspect) offset.x = travel;
                     else offset.y = travelY;
                 }
@@ -563,11 +578,12 @@ internal class GpuSlideshowView @JvmOverloads constructor(
                 return mapped;
             }
             void main() {
-                bool moving = uMoving > 0.5;
-                vec2 uvA = mapUv(vUv, uSizeA, uMotion, moving);
+                bool movingA = uMovingA > 0.5;
+                vec2 uvA = mapUv(vUv, uSizeA, uMotionA, movingA, uMotionProgressA);
                 vec4 a = (uvA.x < 0.0 || uvA.y < 0.0) ? vec4(0.0, 0.0, 0.0, 1.0) : texture2D(uTextureA, uvA);
                 if (uProgress <= 0.0) { gl_FragColor = a; return; }
-                vec2 uvB = mapUv(vUv, uSizeB, 1.0, false);
+                bool movingB = uMovingB > 0.5;
+                vec2 uvB = mapUv(vUv, uSizeB, uMotionB, movingB, uMotionProgressB);
                 vec4 b = (uvB.x < 0.0 || uvB.y < 0.0) ? vec4(0.0, 0.0, 0.0, 1.0) : texture2D(uTextureB, uvB);
                 gl_FragColor = mix(a, b, uProgress);
             }
