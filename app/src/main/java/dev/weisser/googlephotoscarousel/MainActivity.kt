@@ -65,6 +65,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.lifecycleScope
 import androidx.core.content.FileProvider
 import coil.compose.AsyncImage
@@ -1207,7 +1208,10 @@ private fun PlaybackView(
         }
         // Keep exactly the current and next photo warm. Remove the preload during a dissolve
         // so an older Fire TV never has three full-screen decodes in memory at once.
-        if (playing && !paused && !transitionInFlight && nextModel != null && nextModel != model) {
+        val wantsGpuFade = transitionStyle == "fade" || transitionStyle == "crossfade"
+        var gpuRendererFailed by remember { mutableStateOf(false) }
+        val useGpuFade = wantsGpuFade && !gpuRendererFailed
+        if (!useGpuFade && playing && !paused && !transitionInFlight && nextModel != null && nextModel != model) {
             AsyncImage(
                 model = nextModel,
                 contentDescription = null,
@@ -1221,12 +1225,32 @@ private fun PlaybackView(
                 }
             )
         }
-        AnimatedContent(targetState = model, modifier = Modifier.fillMaxSize(), transitionSpec = {
+        if (useGpuFade) {
+            AndroidView(
+                factory = { context -> GpuSlideshowView(context) },
+                modifier = Modifier.fillMaxSize().padding(imagePaddingDp.dp).clipToBounds(),
+                update = { view ->
+                    view.configure(
+                        current = model,
+                        next = nextModel,
+                        durationMs = transitionMs,
+                        scaleMode = imageScaleMode,
+                        motion = (panZoom || imageScaleMode == "ken_burns") && playing && !paused,
+                        seconds = seconds,
+                        panDuration = motionSeconds,
+                        onReady = onNextPreloaded,
+                        onFailed = onNextPreloadFailed,
+                        onMotionRequired = onImageMotionRequired,
+                        onRendererFailure = { gpuRendererFailed = true }
+                    )
+                }
+            )
+        } else AnimatedContent(targetState = model, modifier = Modifier.fillMaxSize(), transitionSpec = {
             when (transitionStyle) {
                 "cut" -> androidx.compose.animation.EnterTransition.None togetherWith androidx.compose.animation.ExitTransition.None
-                "slide" -> (slideInHorizontally(tween(1200)) { it / 30 } + fadeIn(tween(1200))) togetherWith (slideOutHorizontally(tween(1200)) { -it / 30 } + fadeOut(tween(1200)))
-                "zoom" -> (scaleIn(tween(1100), initialScale = 0.995f) + fadeIn(tween(1100))) togetherWith fadeOut(tween(1100))
-                else -> fadeIn(tween(transitionMs)) togetherWith fadeOut(tween(transitionMs))
+                "slide" -> (slideInHorizontally(tween(1000, easing = LinearEasing)) { it / 30 } + fadeIn(tween(1000, easing = LinearEasing))) togetherWith (slideOutHorizontally(tween(1000, easing = LinearEasing)) { -it / 30 } + fadeOut(tween(1000, easing = LinearEasing)))
+                "zoom" -> (scaleIn(tween(950, easing = LinearEasing), initialScale = 0.995f) + fadeIn(tween(950, easing = LinearEasing))) togetherWith fadeOut(tween(950, easing = LinearEasing))
+                else -> fadeIn(tween(transitionMs, easing = LinearEasing)) togetherWith fadeOut(tween(transitionMs, easing = LinearEasing))
             }
         }, label = "photo-transition") { photo ->
             var photoAspect by remember(photo) { mutableFloatStateOf(0f) }
@@ -1258,8 +1282,12 @@ private fun PlaybackView(
                 val travelX = with(density) { ((imageWidth * 1.045f - maxWidth) / 2f).toPx().coerceAtLeast(0f) }
                 val travelY = with(density) { ((imageHeight * 1.045f - maxHeight) / 2f).toPx().coerceAtLeast(0f) }
 
-                LaunchedEffect(photo, photoAspect, motionRequired, playing, paused, motionDuration, travelX, travelY) {
-                    if (motionImage && playing && !paused) {
+                LaunchedEffect(photo, photoAspect, motionRequired, playing, paused, transitionInFlight, motionDuration, travelX, travelY) {
+                    // A crossfade already composites two full-screen images. Stop both
+                    // Ken Burns animations while it runs; otherwise older TV GPUs have
+                    // to blend two moving textures at once. Keep the current transform
+                    // in place and resume motion after the dissolve completes.
+                    if (motionImage && playing && !paused && !transitionInFlight && photo == model) {
                         zoom.snapTo(1f)
                         panX.snapTo(if (horizontalOverflow) -travelX * direction else 0f)
                         panY.snapTo(if (verticalOverflow) -travelY * direction else 0f)
@@ -1272,7 +1300,7 @@ private fun PlaybackView(
                                 panY.animateTo(travelY * direction, tween(motionDuration * 1000, easing = LinearEasing))
                             }
                         }
-                    } else {
+                    } else if (!motionImage || paused || !playing) {
                         zoom.snapTo(1f)
                         panX.snapTo(0f)
                         panY.snapTo(0f)
@@ -1436,7 +1464,7 @@ private fun cycleValue(current: Int, choices: List<Int>, direction: Int): Int {
 }
 
 private fun transitionName(style: String) = when (style) { "cut" -> "Direkt"; "crossfade" -> "Sanfte Überblendung"; "slide" -> "Gleiten"; "zoom" -> "Sanfter Zoom"; else -> "Langsame Überblendung" }
-private fun transitionDurationMillis(style: String) = when (style) { "cut" -> 0; "crossfade" -> 1600; "slide" -> 1200; "zoom" -> 1100; else -> 1400 }
+private fun transitionDurationMillis(style: String) = when (style) { "cut" -> 0; "crossfade" -> 1100; "slide" -> 1000; "zoom" -> 950; else -> 1000 }
 private fun imageScaleName(mode: String) = when (mode) { "fill" -> "Füllen"; "stretch" -> "Strecken"; "ken_burns" -> "Zoom & Schwenk"; else -> "Einpassen" }
 private fun selectedAlbumLabel(images: List<String>, index: Int) = images.getOrNull(index)?.contains("upload-albums") == true
 
