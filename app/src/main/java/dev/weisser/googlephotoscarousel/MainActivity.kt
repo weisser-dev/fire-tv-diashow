@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Build
 import android.util.Log
+import android.util.AtomicFile
 import android.provider.Settings
 import android.view.KeyEvent
 import android.view.WindowManager
@@ -182,6 +183,7 @@ class MainActivity : ComponentActivity() {
             var motionSeconds by remember { mutableIntStateOf(prefs.getInt("motion_seconds", 30)) }
             var shuffle by remember { mutableStateOf(prefs.getBoolean("shuffle", false)) }
             var photoHistory by remember { mutableStateOf<Map<String, PhotoHistory>>(emptyMap()) }
+            val latestPhotoHistory by rememberUpdatedState(photoHistory)
             var photoHistoryLoaded by remember { mutableStateOf(false) }
             var lastRecordedSlide by remember { mutableStateOf<String?>(null) }
             var loadedNextPhoto by remember { mutableStateOf<String?>(null) }
@@ -328,8 +330,21 @@ class MainActivity : ComponentActivity() {
                 if (images.isEmpty()) photoManagerTarget = "clear"
             }
             LaunchedEffect(Unit) {
-                val savedHistory = prefs.getString("photo_history", null)
-                photoHistory = withContext(Dispatchers.IO) { loadPhotoHistory(savedHistory) }
+                val historyFile = File(filesDir, "photo-history.json")
+                val savedHistory = withContext(Dispatchers.IO) {
+                    val historyAtomicFile = AtomicFile(historyFile)
+                    val existing = runCatching { historyAtomicFile.openRead().bufferedReader().use { it.readText() } }.getOrNull()
+                    if (existing != null) {
+                        prefs.edit().remove("photo_history").apply()
+                        existing
+                    } else {
+                        prefs.getString("photo_history", null)?.also { legacyHistory ->
+                            writeAtomicFile(historyAtomicFile, legacyHistory)
+                            prefs.edit().remove("photo_history").apply()
+                        }
+                    }
+                }
+                photoHistory = withContext(Dispatchers.Default) { loadPhotoHistory(savedHistory) }
                 photoHistoryLoaded = true
             }
             LaunchedEffect(images.toList(), photoHistoryLoaded) {
@@ -350,13 +365,14 @@ class MainActivity : ComponentActivity() {
                 photoHistory = photoHistory + (model to old.copy(viewCount = old.viewCount + 1, lastViewedAt = now))
                 lastRecordedSlide = slideKey
             }
-            LaunchedEffect(photoHistory, photoHistoryLoaded) {
+            LaunchedEffect(photoHistoryLoaded) {
                 if (!photoHistoryLoaded) return@LaunchedEffect
-                delay(750)
-                val snapshot = photoHistory
-                val serialized = withContext(Dispatchers.Default) { savePhotoHistory(snapshot) }
-                withContext(Dispatchers.IO) {
-                    prefs.edit().putString("photo_history", serialized).apply()
+                val historyFile = File(filesDir, "photo-history.json")
+                while (true) {
+                    delay(60_000)
+                    val snapshot = latestPhotoHistory
+                    val serialized = withContext(Dispatchers.Default) { savePhotoHistory(snapshot) }
+                    withContext(Dispatchers.IO) { writeAtomicFile(AtomicFile(historyFile), serialized) }
                 }
             }
             LaunchedEffect(uploadAlbums, selectedUploadAlbum) {
@@ -1570,7 +1586,7 @@ private fun TimeWeatherOverlay(showClock: Boolean, showDate: Boolean, showWeathe
         if (calendarEvents.isNotEmpty() || phoneContent.hasContent) {
             val inset = (imagePaddingDp + 42).dp
             AgendaAndPhoneCard(calendarEvents, phoneContent, glassOverlay,
-                Modifier.align(Alignment.BottomStart).padding(start = inset, end = inset, bottom = (imagePaddingDp + 45).dp).fillMaxWidth().height(140.dp))
+                Modifier.align(Alignment.BottomStart).padding(start = inset, end = inset, bottom = (imagePaddingDp + 45).dp).fillMaxWidth().height(230.dp))
         }
     }
 }
@@ -1597,7 +1613,7 @@ private fun SleepScreen(showClock: Boolean, showDate: Boolean, showWeather: Bool
             }
             if (calendarEvents.isNotEmpty() || phoneContent.hasContent) {
                 AgendaAndPhoneCard(calendarEvents, phoneContent, false,
-                    Modifier.padding(top = 16.dp).fillMaxWidth(0.86f).height(160.dp), dimmed = true)
+                    Modifier.padding(top = 16.dp).fillMaxWidth(0.86f).height(230.dp), dimmed = true)
             }
         }
     }
@@ -1781,6 +1797,17 @@ private fun loadPhotoHistory(raw: String?): Map<String, PhotoHistory> = runCatch
 private fun savePhotoHistory(history: Map<String, PhotoHistory>): String = JSONObject().apply {
     history.forEach { (key, value) -> put(key, JSONObject().put("addedAt", value.addedAt).put("viewCount", value.viewCount).put("lastViewedAt", value.lastViewedAt)) }
 }.toString()
+
+private fun writeAtomicFile(atomicFile: AtomicFile, contents: String) {
+    val stream = atomicFile.startWrite()
+    try {
+        stream.write(contents.toByteArray(Charsets.UTF_8))
+        atomicFile.finishWrite(stream)
+    } catch (error: Throwable) {
+        atomicFile.failWrite(stream)
+        throw error
+    }
+}
 
 private fun chooseNextImage(
     images: List<String>, history: Map<String, PhotoHistory>, currentIndex: Int, shuffle: Boolean, failed: Set<String>
