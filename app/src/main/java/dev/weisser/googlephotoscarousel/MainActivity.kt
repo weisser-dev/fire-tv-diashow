@@ -20,9 +20,6 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.scaleIn
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -215,7 +212,11 @@ class MainActivity : ComponentActivity() {
             var focusedAlbumIndex by remember { mutableIntStateOf(0) }
             var paused by remember { mutableStateOf(false) }
             var pauseMenuIndex by remember { mutableIntStateOf(0) }
-            var transitionStyle by remember { mutableStateOf(prefs.getString("transition_style", "fade") ?: "fade") }
+            val savedTransitionStyle = prefs.getString("transition_style", "fade") ?: "fade"
+            var transitionStyle by remember { mutableStateOf(if (savedTransitionStyle == "slide" || savedTransitionStyle == "zoom") "crossfade" else savedTransitionStyle) }
+            if (savedTransitionStyle == "slide" || savedTransitionStyle == "zoom") {
+                prefs.edit().putString("transition_style", "crossfade").apply()
+            }
             if (!prefs.getBoolean("fill_default_migrated", false)) {
                 val editor = prefs.edit()
                 if (prefs.getString("image_scale_mode", null) == "fit") editor.putString("image_scale_mode", "fill")
@@ -530,7 +531,7 @@ class MainActivity : ComponentActivity() {
                                         0 -> focusedSettingsNode = 1
                                         4 -> seconds = (seconds + 1).coerceAtMost(60)
                                         5 -> autoStartOnBoot = !autoStartOnBoot
-                                        11 -> transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut", "slide", "zoom"), 1)
+                                        11 -> transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut"), 1)
                                         12 -> imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch", "ken_burns"), 1)
                                         17 -> { glassOverlay = !glassOverlay; prefs.edit().putBoolean("glass_overlay", glassOverlay).apply() }
                                         18 -> { calendarEnabled = !calendarEnabled; prefs.edit().putBoolean("calendar_enabled", calendarEnabled).apply() }
@@ -547,7 +548,7 @@ class MainActivity : ComponentActivity() {
                                         1 -> focusedSettingsNode = 0
                                         4 -> seconds = (seconds - 1).coerceAtLeast(5)
                                         5 -> autoStartOnBoot = !autoStartOnBoot
-                                        11 -> transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut", "slide", "zoom"), -1)
+                                        11 -> transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut"), -1)
                                         12 -> imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch", "ken_burns"), -1)
                                         17 -> { glassOverlay = !glassOverlay; prefs.edit().putBoolean("glass_overlay", glassOverlay).apply() }
                                         18 -> { calendarEnabled = !calendarEnabled; prefs.edit().putBoolean("calendar_enabled", calendarEnabled).apply() }
@@ -580,7 +581,7 @@ class MainActivity : ComponentActivity() {
                                         6 -> { showClock = !showClock; prefs.edit().putBoolean("show_clock", showClock).apply() }
                                         7 -> { showDate = !showDate; prefs.edit().putBoolean("show_date", showDate).apply() }
                                         8 -> { weatherEnabled = !weatherEnabled; prefs.edit().putBoolean("show_weather", weatherEnabled).apply() }
-                                        11 -> transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut", "slide", "zoom"), 1)
+                                        11 -> transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut"), 1)
                                         12 -> imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch", "ken_burns"), 1)
                                         13 -> { scheduleEnabled = !scheduleEnabled; prefs.edit().putBoolean("schedule_enabled", scheduleEnabled).apply() }
                                         14 -> { scheduleWeekdaysOnly = !scheduleWeekdaysOnly; prefs.edit().putBoolean("schedule_weekdays_only", scheduleWeekdaysOnly).apply() }
@@ -671,7 +672,7 @@ class MainActivity : ComponentActivity() {
                                         2 -> { shuffle = !shuffle; prefs.edit().putBoolean("shuffle", shuffle).apply() }
                                         5 -> { seconds = (seconds + direction).coerceIn(5, 60); prefs.edit().putInt("seconds", seconds).apply() }
                                         6 -> { motionSeconds = cycleValue(motionSeconds, listOf(15, 30, 45, 60), direction); prefs.edit().putInt("motion_seconds", motionSeconds).apply() }
-                                        7 -> { transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut", "slide", "zoom"), direction); prefs.edit().putString("transition_style", transitionStyle).apply() }
+                                        7 -> { transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut"), direction); prefs.edit().putString("transition_style", transitionStyle).apply() }
                                         8 -> { imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch", "ken_burns"), direction); prefs.edit().putString("image_scale_mode", imageScaleMode).apply() }
                                         9 -> { focusedAlbumIndex = (focusedAlbumIndex + direction).coerceIn(0, uploadAlbums.size); selectedUploadAlbum = if (focusedAlbumIndex == 0) "*" else uploadAlbums.getOrNull(focusedAlbumIndex - 1) ?: "*"; prefs.edit().putString("selected_upload_album", selectedUploadAlbum).apply() }
                                         10 -> { sleepTimerMinutes = cycleValue(sleepTimerMinutes, listOf(0, 15, 30, 60), direction); prefs.edit().putInt("sleep_timer_minutes", sleepTimerMinutes).apply(); sleepDeadline = if (sleepTimerMinutes == 0) 0L else System.currentTimeMillis() + sleepTimerMinutes * 60_000L }
@@ -687,7 +688,7 @@ class MainActivity : ComponentActivity() {
                                         4 -> launchPhotoChooser()
                                         5 -> seconds = if (seconds >= 60) 5 else seconds + 1
                                         6 -> { motionSeconds = cycleValue(motionSeconds, listOf(15, 30, 45, 60), 1); prefs.edit().putInt("motion_seconds", motionSeconds).apply() }
-                                        7 -> transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut", "slide", "zoom"), 1)
+                                        7 -> transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut"), 1)
                                         8 -> imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch", "ken_burns"), 1)
                                         9 -> { focusedAlbumIndex = (focusedAlbumIndex + 1).coerceIn(0, uploadAlbums.size); selectedUploadAlbum = if (focusedAlbumIndex == 0) "*" else uploadAlbums.getOrNull(focusedAlbumIndex - 1) ?: "*" }
                                         10 -> { sleepTimerMinutes = cycleValue(sleepTimerMinutes, listOf(0, 15, 30, 60), 1); prefs.edit().putInt("sleep_timer_minutes", sleepTimerMinutes).apply(); sleepDeadline = if (sleepTimerMinutes == 0) 0L else System.currentTimeMillis() + sleepTimerMinutes * 60_000L }
@@ -814,7 +815,7 @@ class MainActivity : ComponentActivity() {
                             onResume = { paused = false }, onAddImages = { startPhotoUpload() }, onAddFiles = { launchPhotoChooser() },
                             onCycleSpeed = { direction -> seconds = (seconds + direction).coerceIn(5, 60); prefs.edit().putInt("seconds", seconds).apply() },
                             onCycleMotionDuration = { direction -> motionSeconds = cycleValue(motionSeconds, listOf(15, 30, 45, 60), direction); prefs.edit().putInt("motion_seconds", motionSeconds).apply() },
-                            onCycleTransition = { direction -> transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut", "slide", "zoom"), direction); prefs.edit().putString("transition_style", transitionStyle).apply() },
+                            onCycleTransition = { direction -> transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut"), direction); prefs.edit().putString("transition_style", transitionStyle).apply() },
                             onCycleScale = { direction -> imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch", "ken_burns"), direction); prefs.edit().putString("image_scale_mode", imageScaleMode).apply() },
                             onToggleShuffle = { shuffle = !shuffle; prefs.edit().putBoolean("shuffle", shuffle).apply() }, onOpenUploadQr = { startPhotoUpload() },
                             onCycleSleepTimer = { direction -> sleepTimerMinutes = cycleValue(sleepTimerMinutes, listOf(0, 15, 30, 60), direction); prefs.edit().putInt("sleep_timer_minutes", sleepTimerMinutes).apply(); sleepDeadline = if (sleepTimerMinutes == 0) 0L else System.currentTimeMillis() + sleepTimerMinutes * 60_000L },
@@ -1323,7 +1324,7 @@ private fun PlaybackView(
         }
         // Keep exactly the current and next photo warm. Remove the preload during a dissolve
         // so an older Fire TV never has three full-screen decodes in memory at once.
-        val wantsGpuFade = transitionStyle == "fade" || transitionStyle == "crossfade"
+        val wantsGpuFade = transitionStyle != "cut"
         var gpuRendererFailed by remember { mutableStateOf(false) }
         val useGpuFade = wantsGpuFade && !gpuRendererFailed
         if (!useGpuFade && playing && !paused && !transitionInFlight && nextModel != null && nextModel != model) {
@@ -1363,8 +1364,6 @@ private fun PlaybackView(
         } else AnimatedContent(targetState = model, modifier = Modifier.fillMaxSize(), transitionSpec = {
             when (transitionStyle) {
                 "cut" -> androidx.compose.animation.EnterTransition.None togetherWith androidx.compose.animation.ExitTransition.None
-                "slide" -> (slideInHorizontally(tween(1000, easing = LinearEasing)) { it / 30 } + fadeIn(tween(1000, easing = LinearEasing))) togetherWith (slideOutHorizontally(tween(1000, easing = LinearEasing)) { -it / 30 } + fadeOut(tween(1000, easing = LinearEasing)))
-                "zoom" -> (scaleIn(tween(950, easing = LinearEasing), initialScale = 0.995f) + fadeIn(tween(950, easing = LinearEasing))) togetherWith fadeOut(tween(950, easing = LinearEasing))
                 else -> fadeIn(tween(transitionMs, easing = LinearEasing)) togetherWith fadeOut(tween(transitionMs, easing = LinearEasing))
             }
         }, label = "photo-transition") { photo ->
@@ -1699,8 +1698,8 @@ private fun cycleValue(current: Int, choices: List<Int>, direction: Int): Int {
     return choices[(index + direction + choices.size) % choices.size]
 }
 
-private fun transitionName(style: String) = when (style) { "cut" -> "Direkt"; "crossfade" -> "Sanfte Überblendung"; "slide" -> "Gleiten"; "zoom" -> "Sanfter Zoom"; else -> "Langsame Überblendung" }
-private fun transitionDurationMillis(style: String) = when (style) { "cut" -> 0; "crossfade" -> 1100; "slide" -> 1000; "zoom" -> 950; else -> 1000 }
+private fun transitionName(style: String) = when (style) { "cut" -> "Direkt"; "crossfade" -> "Sanfte Überblendung"; else -> "Überblenden" }
+private fun transitionDurationMillis(style: String) = when (style) { "cut" -> 0; "crossfade" -> 1100; else -> 1000 }
 private fun imageScaleName(mode: String) = when (mode) { "fill" -> "Füllen"; "stretch" -> "Strecken"; "ken_burns" -> "Zoom & Schwenk"; else -> "Einpassen" }
 private fun selectedAlbumLabel(images: List<String>, index: Int) = images.getOrNull(index)?.contains("upload-albums") == true
 
@@ -1964,7 +1963,7 @@ private fun SettingsDialog(
                 )
                 Spacer(Modifier.height(12.dp))
                 Text("Übergang · ${transitionName(transitionStyle)}", color = Color.White, fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(if (focusedSettingsNode == 11) RemoteFocusSurface else Color.Transparent).clickable { onTransitionStyle(cycleValue(transitionStyle, listOf("fade", "crossfade", "cut", "slide", "zoom"), 1)) }.padding(12.dp))
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(if (focusedSettingsNode == 11) RemoteFocusSurface else Color.Transparent).clickable { onTransitionStyle(cycleValue(transitionStyle, listOf("fade", "crossfade", "cut"), 1)) }.padding(12.dp))
                 Text("Bilddarstellung · ${imageScaleName(imageScaleMode)}", color = Color.White, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(if (focusedSettingsNode == 12) RemoteFocusSurface else Color.Transparent).clickable { onImageScaleMode(cycleValue(imageScaleMode, listOf("fit", "fill", "stretch", "ken_burns"), 1)) }.padding(12.dp))
                 SettingsToggle("Zeitplan verwenden", "Außerhalb der aktiven Zeit automatisch schlafen.", scheduleEnabled, 13, focusedSettingsNode, onScheduleEnabled)

@@ -254,6 +254,7 @@ internal class GpuSlideshowView @JvmOverloads constructor(
         private var transitionDuration = 1000L
         private var transitionMotionEnabled = false
         private var transitionMotionProgress = 0f
+        private var transitionIncomingProgress = 0f
         private var transitioningModel: String? = null
         private var completion: ((Int, Int) -> Unit)? = null
         private var scaleMode = "fit"
@@ -358,7 +359,11 @@ internal class GpuSlideshowView @JvmOverloads constructor(
         private fun beginTransition(durationMs: Int) {
             val now = System.nanoTime()
             transitionMotionEnabled = motion && currentTexture != 0
+            // Freeze the outgoing frame where its pan currently is. The incoming image
+            // gets its own first-frame position for the direction it will move after
+            // the dissolve; never reuse the outgoing image's pan progress for it.
             transitionMotionProgress = if (transitionMotionEnabled) motionProgress(now) else 0f
+            transitionIncomingProgress = if (transitionMotionEnabled && motionDirection > 0f) 1f else 0f
             transitionDuration = durationMs.coerceAtLeast(1).toLong()
             transitionStart = now
             animate = true
@@ -413,7 +418,7 @@ internal class GpuSlideshowView @JvmOverloads constructor(
                         currentModel = transitioningModel
                         transitioningModel = null
                         if (transitionMotionEnabled) motionDirection *= -1f
-                        motionStartProgress = if (transitionMotionEnabled) transitionMotionProgress else 0f
+                        motionStartProgress = if (transitionMotionEnabled) transitionIncomingProgress else 0f
                         transitionStart = 0L
                         movementStart = now
                         animate = motion && currentTexture != 0
@@ -481,7 +486,7 @@ internal class GpuSlideshowView @JvmOverloads constructor(
             GLES20.glUniform1f(GLES20.glGetUniformLocation(shader, "uMotionProgressA"), outgoingProgress)
             GLES20.glUniform1f(GLES20.glGetUniformLocation(shader, "uMovingA"), if (outgoingMotion) 1f else 0f)
             GLES20.glUniform1f(GLES20.glGetUniformLocation(shader, "uMotionB"), if (incomingMotion) 1.0f + 0.045f * transitionMotionProgress else 1f)
-            GLES20.glUniform1f(GLES20.glGetUniformLocation(shader, "uMotionProgressB"), if (incomingMotion) transitionMotionProgress else 0f)
+            GLES20.glUniform1f(GLES20.glGetUniformLocation(shader, "uMotionProgressB"), if (incomingMotion) transitionIncomingProgress else 0f)
             GLES20.glUniform1f(GLES20.glGetUniformLocation(shader, "uMovingB"), if (incomingMotion) 1f else 0f)
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
             GLES20.glDisableVertexAttribArray(position)
