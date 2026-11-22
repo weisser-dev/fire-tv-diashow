@@ -1360,7 +1360,10 @@ private fun PlaybackView(
         }
         // Keep exactly the current and next photo warm. Remove the preload during a dissolve
         // so an older Fire TV never has three full-screen decodes in memory at once.
-        val wantsGpuFade = transitionStyle != "cut"
+        // The Fire TV AFTM stalls on every TextureView buffer swap when the portrait
+        // surface is rotated into the landscape HDMI frame. Compose keeps image motion
+        // in the main window and avoids that extra 1080x1920 buffer queue.
+        val wantsGpuFade = false
         var gpuRendererFailed by remember { mutableStateOf(false) }
         val useGpuFade = wantsGpuFade && !gpuRendererFailed
         if (!useGpuFade && playing && !paused && !transitionInFlight && nextModel != null && nextModel != model) {
@@ -1437,17 +1440,27 @@ private fun PlaybackView(
                     // Ken Burns animations while it runs; otherwise older TV GPUs have
                     // to blend two moving textures at once. Keep the current transform
                     // in place and resume motion after the dissolve completes.
-                    if (motionImage && playing && !paused && !transitionInFlight && photo == model) {
-                        zoom.snapTo(1f)
-                        panX.snapTo(if (horizontalOverflow) -travelX * direction else 0f)
-                        panY.snapTo(if (verticalOverflow) -travelY * direction else 0f)
-                        kotlinx.coroutines.coroutineScope {
-                            launch { zoom.animateTo(1.045f, tween(motionDuration * 1000, easing = LinearEasing)) }
-                            if (horizontalOverflow) launch {
-                                panX.animateTo(travelX * direction, tween(motionDuration * 1000, easing = LinearEasing))
-                            }
-                            if (verticalOverflow) launch {
-                                panY.animateTo(travelY * direction, tween(motionDuration * 1000, easing = LinearEasing))
+                    if (motionImage && playing && !paused && photo == model) {
+                        val startX = if (horizontalOverflow) -travelX * direction else 0f
+                        val startY = if (verticalOverflow) -travelY * direction else 0f
+                        if (transitionInFlight) {
+                            // Enter the dissolve already at B's first frame. The incoming
+                            // image stays still during the fade, then moves from this pose.
+                            zoom.snapTo(1f)
+                            panX.snapTo(startX)
+                            panY.snapTo(startY)
+                        } else {
+                            zoom.snapTo(1f)
+                            panX.snapTo(startX)
+                            panY.snapTo(startY)
+                            kotlinx.coroutines.coroutineScope {
+                                launch { zoom.animateTo(1.045f, tween(motionDuration * 1000, easing = LinearEasing)) }
+                                if (horizontalOverflow) launch {
+                                    panX.animateTo(travelX * direction, tween(motionDuration * 1000, easing = LinearEasing))
+                                }
+                                if (verticalOverflow) launch {
+                                    panY.animateTo(travelY * direction, tween(motionDuration * 1000, easing = LinearEasing))
+                                }
                             }
                         }
                     } else if (!motionImage || paused || !playing) {
