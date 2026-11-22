@@ -1764,7 +1764,7 @@ private fun cycleValue(current: Int, choices: List<Int>, direction: Int): Int {
 }
 
 private fun transitionName(style: String) = when (style) { "cut" -> "Direkt"; "crossfade" -> "Sanfte Überblendung"; else -> "Überblenden" }
-private fun transitionDurationMillis(style: String) = when (style) { "cut" -> 0; "crossfade" -> 1100; else -> 1000 }
+private fun transitionDurationMillis(style: String) = when (style) { "cut" -> 0; "crossfade" -> 750; else -> 850 }
 private fun imageScaleName(mode: String) = when (mode) { "fill" -> "Füllen"; "stretch" -> "Strecken"; "ken_burns" -> "Zoom & Schwenk"; else -> "Einpassen" }
 private fun selectedAlbumLabel(images: List<String>, index: Int) = images.getOrNull(index)?.contains("upload-albums") == true
 
