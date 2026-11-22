@@ -53,6 +53,11 @@ internal class GpuSlideshowView @JvmOverloads constructor(
     private var motionEnabled = true
     private var slideSeconds = 6
     private var motionSeconds = 15
+    private var rendererOptionsInitialized = false
+    private var appliedScaleMode = "fit"
+    private var appliedMotionEnabled = true
+    private var appliedSlideSeconds = 6
+    private var appliedMotionSeconds = 15
     private var onPhotoReady: (String) -> Unit = {}
     private var onPhotoFailed: (String) -> Unit = {}
     private var onMotionRequired: (Boolean) -> Unit = {}
@@ -89,7 +94,15 @@ internal class GpuSlideshowView @JvmOverloads constructor(
         this.onMotionRequired = onMotionRequired
         this.onRendererFailure = onRendererFailure
         desiredNextModel = next?.takeUnless { it == current }
-        renderer.updateOptions(targetScaleMode, motionEnabled, slideSeconds, motionSeconds)
+        if (!rendererOptionsInitialized || targetScaleMode != appliedScaleMode || motionEnabled != appliedMotionEnabled ||
+            slideSeconds != appliedSlideSeconds || motionSeconds != appliedMotionSeconds) {
+            rendererOptionsInitialized = true
+            appliedScaleMode = targetScaleMode
+            appliedMotionEnabled = motionEnabled
+            appliedSlideSeconds = slideSeconds
+            appliedMotionSeconds = motionSeconds
+            renderer.updateOptions(targetScaleMode, motionEnabled, slideSeconds, motionSeconds)
+        }
 
         if (currentModel == null) {
             currentModel = current
@@ -244,6 +257,21 @@ internal class GpuSlideshowView @JvmOverloads constructor(
         private var eglContext: EGLContext = EGL14.EGL_NO_CONTEXT
         private var eglSurface: EGLSurface = EGL14.EGL_NO_SURFACE
         private var shader = 0
+        private var positionLocation = -1
+        private var texCoordLocation = -1
+        private var textureALocation = -1
+        private var textureBLocation = -1
+        private var sizeALocation = -1
+        private var sizeBLocation = -1
+        private var viewportLocation = -1
+        private var modeLocation = -1
+        private var progressLocation = -1
+        private var motionALocation = -1
+        private var motionProgressALocation = -1
+        private var movingALocation = -1
+        private var motionBLocation = -1
+        private var motionProgressBLocation = -1
+        private var movingBLocation = -1
         private var currentTexture = 0
         private var nextTexture = 0
         private var currentWidth = 1
@@ -309,14 +337,24 @@ internal class GpuSlideshowView @JvmOverloads constructor(
         }
 
         fun updateOptions(mode: String, moving: Boolean, seconds: Int, panSeconds: Int) {
-            scaleMode = mode
-            motion = moving
-            slideDurationSeconds = seconds
-            panDurationSeconds = panSeconds
             command {
-                if (currentTexture != 0) movementDuration = durationFor(currentWidth, currentHeight)
-                movementStart = System.nanoTime()
-                updateAnimationMode()
+                val now = System.nanoTime()
+                val startProgress = when {
+                    currentTexture == 0 -> 0f
+                    motion -> motionProgress(now)
+                    motionDirection > 0f -> 0f
+                    else -> 1f
+                }
+                scaleMode = mode
+                motion = moving
+                slideDurationSeconds = seconds
+                panDurationSeconds = panSeconds
+                if (currentTexture != 0) {
+                    motionStartProgress = if (moving) startProgress else 0f
+                    movementStart = now
+                    movementDuration = durationFor(currentWidth, currentHeight)
+                }
+                updateAnimationMode(now)
             }
         }
 
@@ -395,6 +433,7 @@ internal class GpuSlideshowView @JvmOverloads constructor(
             try {
                 createEgl(surface)
                 shader = createProgram(VERTEX_SHADER, FRAGMENT_SHADER)
+                cacheShaderLocations()
                 GLES20.glViewport(0, 0, surfaceWidth, surfaceHeight)
                 while (running.get()) {
                     while (true) (commands.poll() ?: break).invoke()
@@ -421,11 +460,11 @@ internal class GpuSlideshowView @JvmOverloads constructor(
                         motionStartProgress = if (transitionMotionEnabled) transitionIncomingProgress else 0f
                         transitionStart = 0L
                         movementStart = now
-                        animate = motion && currentTexture != 0
+                        animate = hasMotionRemaining(now)
                         wake(false)
                         completion?.invoke(currentWidth, currentHeight)
                     } else {
-                        animate = transitionStart > 0L || motion && currentTexture != 0
+                        animate = transitionStart > 0L || hasMotionRemaining(now)
                     }
                     dirtyFrame = false
                     if (shouldDraw && animate) Thread.sleep(16)
@@ -462,35 +501,55 @@ internal class GpuSlideshowView @JvmOverloads constructor(
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
             if (shader == 0 || currentTexture == 0) return
             GLES20.glUseProgram(shader)
-            val position = GLES20.glGetAttribLocation(shader, "aPosition")
-            val texCoord = GLES20.glGetAttribLocation(shader, "aTexCoord")
             vertices.position(0)
-            GLES20.glEnableVertexAttribArray(position)
-            GLES20.glVertexAttribPointer(position, 2, GLES20.GL_FLOAT, false, 16, vertices)
+            GLES20.glEnableVertexAttribArray(positionLocation)
+            GLES20.glVertexAttribPointer(positionLocation, 2, GLES20.GL_FLOAT, false, 16, vertices)
             vertices.position(2)
-            GLES20.glEnableVertexAttribArray(texCoord)
-            GLES20.glVertexAttribPointer(texCoord, 2, GLES20.GL_FLOAT, false, 16, vertices)
-            bindTexture(shader, "uTextureA", currentTexture, 0)
-            bindTexture(shader, "uTextureB", if (nextTexture == 0) currentTexture else nextTexture, 1)
-            uniform2f(shader, "uSizeA", currentWidth.toFloat(), currentHeight.toFloat())
-            uniform2f(shader, "uSizeB", if (nextTexture == 0) currentWidth.toFloat() else nextWidth.toFloat(), if (nextTexture == 0) currentHeight.toFloat() else nextHeight.toFloat())
-            uniform2f(shader, "uViewport", surfaceWidth.toFloat(), surfaceHeight.toFloat())
-            GLES20.glUniform1i(GLES20.glGetUniformLocation(shader, "uMode"), when (scaleMode) { "stretch" -> 2; "fill", "ken_burns" -> 1; else -> 0 })
+            GLES20.glEnableVertexAttribArray(texCoordLocation)
+            GLES20.glVertexAttribPointer(texCoordLocation, 2, GLES20.GL_FLOAT, false, 16, vertices)
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, currentTexture)
+            GLES20.glUniform1i(textureALocation, 0)
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE1)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, if (nextTexture == 0) currentTexture else nextTexture)
+            GLES20.glUniform1i(textureBLocation, 1)
+            GLES20.glUniform2f(sizeALocation, currentWidth.toFloat(), currentHeight.toFloat())
+            GLES20.glUniform2f(sizeBLocation, if (nextTexture == 0) currentWidth.toFloat() else nextWidth.toFloat(), if (nextTexture == 0) currentHeight.toFloat() else nextHeight.toFloat())
+            GLES20.glUniform2f(viewportLocation, surfaceWidth.toFloat(), surfaceHeight.toFloat())
+            GLES20.glUniform1i(modeLocation, when (scaleMode) { "stretch" -> 2; "fill", "ken_burns" -> 1; else -> 0 })
             val inTransition = transitionStart > 0L && nextTexture != 0
             val progress = if (inTransition) ((now - transitionStart).toDouble() / (transitionDuration * 1_000_000.0)).toFloat().coerceIn(0f, 1f) else 0f
-            GLES20.glUniform1f(GLES20.glGetUniformLocation(shader, "uProgress"), progress)
+            GLES20.glUniform1f(progressLocation, progress)
             val outgoingMotion = if (inTransition) transitionMotionEnabled else motion
             val outgoingProgress = if (inTransition) transitionMotionProgress else if (motion) motionProgress(now) else 0f
             val incomingMotion = inTransition && transitionMotionEnabled
-            GLES20.glUniform1f(GLES20.glGetUniformLocation(shader, "uMotionA"), if (outgoingMotion) 1.0f + 0.045f * outgoingProgress else 1f)
-            GLES20.glUniform1f(GLES20.glGetUniformLocation(shader, "uMotionProgressA"), outgoingProgress)
-            GLES20.glUniform1f(GLES20.glGetUniformLocation(shader, "uMovingA"), if (outgoingMotion) 1f else 0f)
-            GLES20.glUniform1f(GLES20.glGetUniformLocation(shader, "uMotionB"), if (incomingMotion) 1.0f + 0.045f * transitionMotionProgress else 1f)
-            GLES20.glUniform1f(GLES20.glGetUniformLocation(shader, "uMotionProgressB"), if (incomingMotion) transitionIncomingProgress else 0f)
-            GLES20.glUniform1f(GLES20.glGetUniformLocation(shader, "uMovingB"), if (incomingMotion) 1f else 0f)
+            GLES20.glUniform1f(motionALocation, if (outgoingMotion) 1.0f + 0.045f * outgoingProgress else 1f)
+            GLES20.glUniform1f(motionProgressALocation, outgoingProgress)
+            GLES20.glUniform1f(movingALocation, if (outgoingMotion) 1f else 0f)
+            GLES20.glUniform1f(motionBLocation, if (incomingMotion) 1.0f + 0.045f * transitionIncomingProgress else 1f)
+            GLES20.glUniform1f(motionProgressBLocation, if (incomingMotion) transitionIncomingProgress else 0f)
+            GLES20.glUniform1f(movingBLocation, if (incomingMotion) 1f else 0f)
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
-            GLES20.glDisableVertexAttribArray(position)
-            GLES20.glDisableVertexAttribArray(texCoord)
+            GLES20.glDisableVertexAttribArray(positionLocation)
+            GLES20.glDisableVertexAttribArray(texCoordLocation)
+        }
+
+        private fun cacheShaderLocations() {
+            positionLocation = GLES20.glGetAttribLocation(shader, "aPosition")
+            texCoordLocation = GLES20.glGetAttribLocation(shader, "aTexCoord")
+            textureALocation = GLES20.glGetUniformLocation(shader, "uTextureA")
+            textureBLocation = GLES20.glGetUniformLocation(shader, "uTextureB")
+            sizeALocation = GLES20.glGetUniformLocation(shader, "uSizeA")
+            sizeBLocation = GLES20.glGetUniformLocation(shader, "uSizeB")
+            viewportLocation = GLES20.glGetUniformLocation(shader, "uViewport")
+            modeLocation = GLES20.glGetUniformLocation(shader, "uMode")
+            progressLocation = GLES20.glGetUniformLocation(shader, "uProgress")
+            motionALocation = GLES20.glGetUniformLocation(shader, "uMotionA")
+            motionProgressALocation = GLES20.glGetUniformLocation(shader, "uMotionProgressA")
+            movingALocation = GLES20.glGetUniformLocation(shader, "uMovingA")
+            motionBLocation = GLES20.glGetUniformLocation(shader, "uMotionB")
+            motionProgressBLocation = GLES20.glGetUniformLocation(shader, "uMotionProgressB")
+            movingBLocation = GLES20.glGetUniformLocation(shader, "uMovingB")
         }
 
         private fun upload(bitmap: Bitmap): Int {
@@ -510,8 +569,14 @@ internal class GpuSlideshowView @JvmOverloads constructor(
             if (texture != 0) GLES20.glDeleteTextures(1, intArrayOf(texture), 0)
         }
 
-        private fun updateAnimationMode() {
-            animate = motion && currentTexture != 0
+        private fun updateAnimationMode(now: Long = System.nanoTime()) {
+            animate = hasMotionRemaining(now)
+        }
+
+        private fun hasMotionRemaining(now: Long): Boolean {
+            if (!motion || currentTexture == 0) return false
+            val progress = motionProgress(now)
+            return if (motionDirection > 0f) progress < 1f else progress > 0f
         }
 
         private fun motionProgress(now: Long): Float =
@@ -638,14 +703,5 @@ internal class GpuSlideshowView @JvmOverloads constructor(
             }
         }
 
-        private fun bindTexture(program: Int, uniform: String, texture: Int, unit: Int) {
-            GLES20.glActiveTexture(GLES20.GL_TEXTURE0 + unit)
-            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture)
-            GLES20.glUniform1i(GLES20.glGetUniformLocation(program, uniform), unit)
-        }
-
-        private fun uniform2f(program: Int, uniform: String, x: Float, y: Float) {
-            GLES20.glUniform2f(GLES20.glGetUniformLocation(program, uniform), x, y)
-        }
     }
 }

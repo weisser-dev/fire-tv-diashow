@@ -1569,10 +1569,8 @@ private fun TimeWeatherOverlay(showClock: Boolean, showDate: Boolean, showWeathe
         }
         if (calendarEvents.isNotEmpty() || phoneContent.hasContent) {
             val inset = (imagePaddingDp + 42).dp
-            Row(Modifier.align(Alignment.BottomStart).padding(start = inset, end = inset, bottom = (imagePaddingDp + 45).dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
-                if (calendarEvents.isNotEmpty()) CalendarAgenda(calendarEvents, glassOverlay, Modifier.weight(1f).height(140.dp))
-                if (phoneContent.hasContent) PhoneListsCard(phoneContent, glassOverlay, Modifier.weight(1f).height(140.dp))
-            }
+            AgendaAndPhoneCard(calendarEvents, phoneContent, glassOverlay,
+                Modifier.align(Alignment.BottomStart).padding(start = inset, end = inset, bottom = (imagePaddingDp + 45).dp).fillMaxWidth().height(140.dp))
         }
     }
 }
@@ -1597,18 +1595,36 @@ private fun SleepScreen(showClock: Boolean, showDate: Boolean, showWeather: Bool
                     Text(weatherLabel, color = Color(0xFF555B63), fontSize = 19.sp)
                 }
             }
-            if (calendarEvents.isNotEmpty()) {
-                CalendarAgenda(calendarEvents, false, Modifier.padding(top = 14.dp).fillMaxWidth(0.72f).heightIn(max = 140.dp), dimmed = true)
-            }
-            if (phoneContent.todos.isNotEmpty()) {
-                PhoneSectionCard("Aufgaben", phoneContent.todos.map { (if (it.done) "☑ " else "□ ") + it.text }, false,
-                    Modifier.padding(top = 10.dp).fillMaxWidth(0.72f).heightIn(max = 110.dp), dimmed = true)
-            }
-            if (phoneContent.notes.isNotEmpty()) {
-                PhoneSectionCard("Notizen", phoneContent.notes.map { it.text }, false,
-                    Modifier.padding(top = 10.dp).fillMaxWidth(0.72f).heightIn(max = 140.dp), dimmed = true)
+            if (calendarEvents.isNotEmpty() || phoneContent.hasContent) {
+                AgendaAndPhoneCard(calendarEvents, phoneContent, false,
+                    Modifier.padding(top = 16.dp).fillMaxWidth(0.86f).height(160.dp), dimmed = true)
             }
         }
+    }
+}
+
+@Composable
+private fun AgendaAndPhoneCard(
+    events: List<CalendarEvent>,
+    content: PhoneContent,
+    glass: Boolean,
+    modifier: Modifier = Modifier,
+    dimmed: Boolean = false
+) {
+    val shape = RoundedCornerShape(16.dp)
+    val background = when {
+        dimmed -> Modifier.clip(shape).background(Color(0x4420262D)).border(1.dp, Color(0x44565F69), shape)
+        glass -> Modifier.clip(shape).background(Brush.linearGradient(listOf(Color(0x44FFFFFF), Color(0x66404D5A), Color(0xDD101820)))).border(1.dp, Color(0x668E9AAA), shape)
+        else -> Modifier.clip(shape).background(Color(0xAA0E1116))
+    }
+    val hasEvents = events.isNotEmpty()
+    val hasPhoneContent = content.hasContent
+    Row(modifier.then(background).padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (hasEvents) CalendarAgenda(events, glass, Modifier.weight(1f).fillMaxHeight(), dimmed, drawCardBackground = false)
+        if (hasEvents && hasPhoneContent) {
+            Box(Modifier.width(1.dp).fillMaxHeight().background(if (dimmed) Color(0x333F464E) else Color(0x558E9AAA)))
+        }
+        if (hasPhoneContent) PhoneListsCard(content, glass, Modifier.weight(1f).fillMaxHeight(), dimmed, drawCardBackground = false)
     }
 }
 
@@ -1621,7 +1637,7 @@ private fun NoteCard(text: String, glass: Boolean, modifier: Modifier = Modifier
 }
 
 @Composable
-private fun CalendarAgenda(events: List<CalendarEvent>, glass: Boolean, modifier: Modifier = Modifier, dimmed: Boolean = false) {
+private fun CalendarAgenda(events: List<CalendarEvent>, glass: Boolean, modifier: Modifier = Modifier, dimmed: Boolean = false, drawCardBackground: Boolean = true) {
     val zone = java.util.TimeZone.getDefault()
     val now = java.util.Date()
     val todayDate = dayStart(now, zone)
@@ -1644,7 +1660,7 @@ private fun CalendarAgenda(events: List<CalendarEvent>, glass: Boolean, modifier
     }
     val headingColor = if (dimmed) Color(0xFF747C85) else Color(0xFFE8C98C)
     val eventColor = if (dimmed) Color(0xFF818991) else Color.White
-    Column(modifier.then(background).verticalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 7.dp)) {
+    Column(modifier.then(if (drawCardBackground) background else Modifier).verticalScroll(rememberScrollState()).padding(horizontal = 4.dp, vertical = 2.dp)) {
         grouped.forEach { (label, items) ->
             Text(label, color = headingColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
             items.forEach { event ->
@@ -1667,7 +1683,7 @@ private fun CalendarAgenda(events: List<CalendarEvent>, glass: Boolean, modifier
 }
 
 @Composable
-private fun PhoneListsCard(content: PhoneContent, glass: Boolean, modifier: Modifier = Modifier, dimmed: Boolean = false) {
+private fun PhoneListsCard(content: PhoneContent, glass: Boolean, modifier: Modifier = Modifier, dimmed: Boolean = false, drawCardBackground: Boolean = true) {
     val shape = RoundedCornerShape(16.dp)
     val background = when {
         dimmed -> Modifier.clip(shape).background(Color(0x4420262D)).border(1.dp, Color(0x44565F69), shape)
@@ -1676,7 +1692,7 @@ private fun PhoneListsCard(content: PhoneContent, glass: Boolean, modifier: Modi
     }
     val mainText = if (dimmed) Color(0xFF818991) else Color.White
     val heading = if (dimmed) Color(0xFF747C85) else Color(0xFFE8C98C)
-    Column(modifier.then(background).verticalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 7.dp)) {
+    Column(modifier.then(if (drawCardBackground) background else Modifier).verticalScroll(rememberScrollState()).padding(horizontal = 4.dp, vertical = 2.dp)) {
         if (content.todos.isNotEmpty()) {
             Text("Aufgaben", color = heading, fontSize = 10.sp, fontWeight = FontWeight.Bold)
             content.todos.forEach { todo ->
