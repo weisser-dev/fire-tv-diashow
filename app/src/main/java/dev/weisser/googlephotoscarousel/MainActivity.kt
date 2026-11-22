@@ -17,6 +17,11 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -93,7 +98,7 @@ class MainActivity : ComponentActivity() {
     private var uploadStatus by mutableStateOf("")
     private var uploadServer: LocalPhotoUploadServer? = null
     private var phoneContentUpdate by mutableStateOf<String?>(null)
-    private var phoneHiddenCalendarTitlesUpdate by mutableStateOf<String?>(null)
+    private var phoneHiddenCalendarTitles by mutableStateOf<List<String>>(emptyList())
     private var calendarEventsSnapshot by mutableStateOf<List<CalendarEvent>>(emptyList())
     private var remoteKeyHandler: ((Int) -> Boolean)? = null
     private val remoteHandledKeys = mutableSetOf<Int>()
@@ -171,6 +176,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val photoPrefs = getSharedPreferences("carousel", MODE_PRIVATE)
         localPhotoUris = photoPrefs.getStringSet("local_photos", emptySet()).orEmpty().toList()
+        phoneHiddenCalendarTitles = parseCalendarTitleList(photoPrefs.getString("calendar_phone_hidden_titles", null))
         photoPrefs.edit().remove("google_photos").apply()
         File(filesDir, "google-photos").deleteRecursively()
         refreshUploadedPhotos()
@@ -243,14 +249,14 @@ class MainActivity : ComponentActivity() {
             var calendarEnabled by remember { mutableStateOf(prefs.getBoolean("calendar_enabled", false)) }
             var calendarFeedUrl by remember { mutableStateOf(prefs.getString("calendar_feed_url", "").orEmpty()) }
             var calendarBlacklist by remember { mutableStateOf(prefs.getString("calendar_blacklist", "").orEmpty()) }
-            var phoneHiddenCalendarTitles by remember { mutableStateOf(parseCalendarTitleList(prefs.getString("calendar_phone_hidden_titles", null))) }
             var calendarEvents by remember { mutableStateOf<List<CalendarEvent>>(emptyList()) }
             var calendarStatus by remember { mutableStateOf("") }
             val visibleCalendarEvents = remember(calendarEvents, calendarBlacklist, phoneHiddenCalendarTitles) {
                 val blockedTerms = calendarBlacklist.split(',', ';', '\n').map(String::trim).filter(String::isNotBlank)
+                val hiddenTitleKeys = phoneHiddenCalendarTitles.map(::calendarTitleKey).toSet()
                 calendarEvents.filterNot { event ->
                     blockedTerms.any { event.title.contains(it, ignoreCase = true) } ||
-                        phoneHiddenCalendarTitles.any { event.title.equals(it, ignoreCase = true) }
+                        calendarTitleKey(event.title) in hiddenTitleKeys
                 }
             }
             var notesEnabled by remember { mutableStateOf(prefs.getBoolean("notes_enabled", false)) }
@@ -264,13 +270,6 @@ class MainActivity : ComponentActivity() {
                     phoneContentUpdate = null
                 }
             }
-            LaunchedEffect(phoneHiddenCalendarTitlesUpdate) {
-                phoneHiddenCalendarTitlesUpdate?.let { updated ->
-                    phoneHiddenCalendarTitles = parseCalendarTitleList(updated)
-                    prefs.edit().putString("calendar_phone_hidden_titles", updated).apply()
-                    phoneHiddenCalendarTitlesUpdate = null
-                }
-            }
             LaunchedEffect(calendarEvents) { calendarEventsSnapshot = calendarEvents }
             LaunchedEffect(orientationChosen) {
                 if (orientationChosen && uploadServer == null && uploadUrl == null) startPhotoUpload(showDialog = false)
@@ -282,7 +281,6 @@ class MainActivity : ComponentActivity() {
             val focusManager = LocalFocusManager.current
             val photoListState = rememberLazyListState()
             val uiScope = rememberCoroutineScope()
-            val transitionCover = remember { Animatable(0f) }
             var slideTransitionJob by remember { mutableStateOf<Job?>(null) }
             var transitionTargetIndex by remember { mutableIntStateOf(-1) }
             val settingsFocusRequester = remember { FocusRequester() }
@@ -318,17 +316,11 @@ class MainActivity : ComponentActivity() {
                     transitionTargetIndex = target
                     slideTransitionJob = uiScope.launch {
                         val style = transitionStyle
+                        index = target
                         if (style == "cut") {
-                            transitionCover.snapTo(0f)
-                            index = target
                             transitionTargetIndex = -1
                         } else {
-                            val fadeDuration = (transitionDurationMillis(style) / 3).coerceIn(200, 300)
-                            transitionCover.animateTo(1f, tween(fadeDuration, easing = LinearEasing))
-                            delay(45)
-                            index = target
-                            delay(45)
-                            transitionCover.animateTo(0f, tween(fadeDuration, easing = LinearEasing))
+                            delay(transitionDurationMillis(style).toLong())
                             transitionTargetIndex = -1
                         }
                     }
@@ -485,28 +477,28 @@ class MainActivity : ComponentActivity() {
                     if (code !in setOf(KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT)) return false
                     val photoNode = if (images.isNotEmpty()) 5 else 7
                     val albumNode = if (uploadAlbums.isNotEmpty()) 3 else photoNode
-                    val firstContentNode = if (updateRelease != null && !updateBusy) 8 else 1
+                    val updateBannerVisible = updateRelease != null && !updateBusy
                     val next = if (portraitUi) when (from) {
-                        0 -> if (code == KeyEvent.KEYCODE_DPAD_DOWN) firstContentNode else null
-                        8 -> when (code) { KeyEvent.KEYCODE_DPAD_UP -> 0; KeyEvent.KEYCODE_DPAD_DOWN -> 1; else -> null }
-                        1 -> when (code) { KeyEvent.KEYCODE_DPAD_UP -> 0; KeyEvent.KEYCODE_DPAD_DOWN -> 2; else -> null }
+                        0 -> if (code == KeyEvent.KEYCODE_DPAD_DOWN) 6 else null
+                        8 -> when (code) { KeyEvent.KEYCODE_DPAD_UP -> 6; KeyEvent.KEYCODE_DPAD_DOWN -> 1; else -> null }
+                        6 -> when (code) { KeyEvent.KEYCODE_DPAD_UP -> 0; KeyEvent.KEYCODE_DPAD_DOWN -> if (updateBannerVisible) 8 else 1; else -> null }
+                        1 -> when (code) { KeyEvent.KEYCODE_DPAD_UP -> if (updateBannerVisible) 8 else 6; KeyEvent.KEYCODE_DPAD_DOWN -> 2; else -> null }
                         2 -> when (code) { KeyEvent.KEYCODE_DPAD_UP -> 1; KeyEvent.KEYCODE_DPAD_DOWN -> albumNode; else -> null }
                         3 -> when (code) { KeyEvent.KEYCODE_DPAD_UP -> 2; KeyEvent.KEYCODE_DPAD_DOWN -> 4; else -> null }
                         4 -> when (code) { KeyEvent.KEYCODE_DPAD_UP -> 3; KeyEvent.KEYCODE_DPAD_DOWN -> photoNode; else -> null }
-                        5 -> when (code) { KeyEvent.KEYCODE_DPAD_UP -> if (uploadAlbums.isNotEmpty()) 4 else 2; KeyEvent.KEYCODE_DPAD_DOWN -> 6; else -> null }
-                        6 -> when (code) { KeyEvent.KEYCODE_DPAD_UP -> 5; KeyEvent.KEYCODE_DPAD_DOWN -> 7; else -> null }
-                        7 -> if (code == KeyEvent.KEYCODE_DPAD_UP) if (images.isNotEmpty()) 6 else if (uploadAlbums.isNotEmpty()) 4 else 2 else null
+                        5 -> when (code) { KeyEvent.KEYCODE_DPAD_UP -> if (uploadAlbums.isNotEmpty()) 4 else 2; KeyEvent.KEYCODE_DPAD_DOWN -> 7; else -> null }
+                        7 -> if (code == KeyEvent.KEYCODE_DPAD_UP) if (images.isNotEmpty()) 5 else if (uploadAlbums.isNotEmpty()) 4 else 2 else null
                         else -> null
                     } else when (from) {
-                        0 -> if (code == KeyEvent.KEYCODE_DPAD_DOWN) firstContentNode else null
-                        8 -> when (code) { KeyEvent.KEYCODE_DPAD_UP -> 0; KeyEvent.KEYCODE_DPAD_DOWN -> 1; else -> null }
-                        1 -> when (code) { KeyEvent.KEYCODE_DPAD_RIGHT -> 2; KeyEvent.KEYCODE_DPAD_UP -> 0; KeyEvent.KEYCODE_DPAD_DOWN -> albumNode; else -> null }
-                        2 -> when (code) { KeyEvent.KEYCODE_DPAD_LEFT -> 1; KeyEvent.KEYCODE_DPAD_UP -> 0; KeyEvent.KEYCODE_DPAD_DOWN -> albumNode; else -> null }
+                        0 -> if (code == KeyEvent.KEYCODE_DPAD_DOWN) 6 else null
+                        8 -> when (code) { KeyEvent.KEYCODE_DPAD_UP -> 6; KeyEvent.KEYCODE_DPAD_DOWN -> 1; else -> null }
+                        6 -> when (code) { KeyEvent.KEYCODE_DPAD_UP -> 0; KeyEvent.KEYCODE_DPAD_DOWN -> if (updateBannerVisible) 8 else 1; else -> null }
+                        1 -> when (code) { KeyEvent.KEYCODE_DPAD_RIGHT -> 2; KeyEvent.KEYCODE_DPAD_UP -> if (updateBannerVisible) 8 else 6; KeyEvent.KEYCODE_DPAD_DOWN -> albumNode; else -> null }
+                        2 -> when (code) { KeyEvent.KEYCODE_DPAD_LEFT -> 1; KeyEvent.KEYCODE_DPAD_UP -> if (updateBannerVisible) 8 else 6; KeyEvent.KEYCODE_DPAD_DOWN -> albumNode; else -> null }
                         3 -> when (code) { KeyEvent.KEYCODE_DPAD_UP -> 2; KeyEvent.KEYCODE_DPAD_DOWN -> 4; else -> null }
                         4 -> when (code) { KeyEvent.KEYCODE_DPAD_UP -> 3; KeyEvent.KEYCODE_DPAD_DOWN -> photoNode; else -> null }
-                        5 -> when (code) { KeyEvent.KEYCODE_DPAD_UP -> 4; KeyEvent.KEYCODE_DPAD_DOWN -> 6; else -> null }
-                        6 -> when (code) { KeyEvent.KEYCODE_DPAD_UP -> 5; KeyEvent.KEYCODE_DPAD_DOWN -> 7; else -> null }
-                        7 -> if (code == KeyEvent.KEYCODE_DPAD_UP) if (images.isNotEmpty()) 6 else if (uploadAlbums.isNotEmpty()) 4 else 2 else null
+                        5 -> when (code) { KeyEvent.KEYCODE_DPAD_UP -> 4; KeyEvent.KEYCODE_DPAD_DOWN -> 7; else -> null }
+                        7 -> if (code == KeyEvent.KEYCODE_DPAD_UP) if (images.isNotEmpty()) 5 else if (uploadAlbums.isNotEmpty()) 4 else 2 else null
                         else -> null
                     }
                     if (next != null) focusMainNode(next)
@@ -873,7 +865,7 @@ class MainActivity : ComponentActivity() {
                     if (sleeping) {
                         SleepScreen(showClock, showDate, weatherEnabled, weatherLabel, glassOverlay, if (calendarEnabled) visibleCalendarEvents else emptyList(), if (notesEnabled) phoneContent else PhoneContent(), uploadUrl) { startPhotoUpload() }
                     } else if (playing && images.isNotEmpty()) {
-                        PlaybackView(images, index, nextSlideIndex, panZoom, seconds, motionSeconds, playing, paused, imageScaleMode, imagePaddingDp, playbackControlsPulse, transitionStyle, pauseMenuIndex, shuffle, sleepTimerMinutes, transitionCover.value, transitionCover.value > 0f, index == transitionTargetIndex,
+                        PlaybackView(images, index, nextSlideIndex, panZoom, seconds, motionSeconds, playing, paused, imageScaleMode, imagePaddingDp, playbackControlsPulse, transitionStyle, pauseMenuIndex, shuffle, sleepTimerMinutes, transitionTargetIndex >= 0, index == transitionTargetIndex,
                             showClock, showDate, weatherEnabled, weatherLabel, glassOverlay, if (calendarEnabled) visibleCalendarEvents else emptyList(), if (notesEnabled) phoneContent else PhoneContent(), uploadUrl,
                             onNextPreloaded = { loadedNextPhoto = it },
                             onNextPreloadFailed = { failedPreloadPhotos = failedPreloadPhotos + it },
@@ -911,6 +903,23 @@ class MainActivity : ComponentActivity() {
                                         showSettings = true
                                     }
                                 ) { Icon(Icons.Default.Tune, "Einstellungen", tint = Color.White) }
+                            }
+                            if (images.isNotEmpty()) {
+                                Spacer(Modifier.height(10.dp))
+                                Button(
+                                    onClick = { logRemote("play clicked images=${images.size} rotation=$displayRotation shuffle=$shuffle"); beginPlayback() },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (playButtonFocused || mainFocusNode == 6) RemoteFocusSurface else Accent,
+                                        contentColor = if (playButtonFocused || mainFocusNode == 6) Color.White else Ink
+                                    ),
+                                    modifier = Modifier.fillMaxWidth().height(56.dp).focusRequester(playFocusRequester)
+                                        .onFocusChanged { playButtonFocused = it.isFocused; if (it.isFocused) mainFocusNode = 6 }
+                                        .then(if (playButtonFocused || mainFocusNode == 6) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(14.dp)) else Modifier)
+                                ) {
+                                    Icon(Icons.Default.PlayArrow, null)
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Abspielen", fontWeight = FontWeight.Bold)
+                                }
                             }
                             if (updateRelease != null || updateBusy || updateStatus != null) {
                                 Row(
@@ -1014,9 +1023,6 @@ class MainActivity : ComponentActivity() {
                                 }
                                 Spacer(Modifier.height(20.dp))
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                        Button(onClick = { logRemote("play clicked images=${images.size} rotation=$displayRotation shuffle=$shuffle"); beginPlayback() }, colors = ButtonDefaults.buttonColors(containerColor = if (playButtonFocused || mainFocusNode == 6) RemoteFocusSurface else Accent, contentColor = if (playButtonFocused || mainFocusNode == 6) Color.White else Ink), modifier = Modifier.height(54.dp).focusRequester(playFocusRequester).onFocusChanged { playButtonFocused = it.isFocused; if (it.isFocused) mainFocusNode = 6 }.then(if (playButtonFocused || mainFocusNode == 6) Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(14.dp)) else Modifier)) {
-                                        Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(6.dp)); Text("Abspielen", fontWeight = FontWeight.Bold)
-                                    }
                                     OutlinedButton(onClick = { index = (index - 1 + images.size) % images.size }, modifier = Modifier.height(54.dp)) { Icon(Icons.Default.SkipPrevious, "Vorheriges Bild") }
                                     OutlinedButton(onClick = { index = (index + 1) % images.size }, modifier = Modifier.height(54.dp)) { Icon(Icons.Default.SkipNext, "Nächstes Bild") }
                                 }
@@ -1224,9 +1230,11 @@ class MainActivity : ComponentActivity() {
             },
             onCalendarHiddenTitlesUpdated = { updated ->
                 runOnUiThread {
+                    val parsed = parseCalendarTitleList(updated)
                     prefs.edit().putString("calendar_phone_hidden_titles", updated).apply()
-                    phoneHiddenCalendarTitlesUpdate = updated
+                    phoneHiddenCalendarTitles = parsed
                     uploadStatus = "Kalenderauswahl auf dem Fernseher gespeichert."
+                    logRemote("calendar hidden-title update applied count=${parsed.size}")
                 }
             }
         )
@@ -1378,7 +1386,7 @@ private fun EmptyState() {
 private fun PlaybackView(
     images: List<String>, index: Int, nextIndex: Int, panZoom: Boolean, seconds: Int, motionSeconds: Int, playing: Boolean,
     paused: Boolean, imageScaleMode: String, imagePaddingDp: Int, controlsPulse: Int, transitionStyle: String, pauseMenuIndex: Int, shuffle: Boolean, sleepTimerMinutes: Int,
-    transitionCoverAlpha: Float, transitionInFlight: Boolean, transitionIncoming: Boolean,
+    transitionInFlight: Boolean, transitionIncoming: Boolean,
     showClock: Boolean, showDate: Boolean, showWeather: Boolean, weatherLabel: String, glassOverlay: Boolean, calendarEvents: List<CalendarEvent>, phoneContent: PhoneContent, uploadUrl: String?,
     onNextPreloaded: (String) -> Unit, onNextPreloadFailed: (String) -> Unit,
     onImageMotionRequired: (Boolean) -> Unit,
@@ -1439,8 +1447,21 @@ private fun PlaybackView(
                     )
                 }
             )
-        } else key(model) {
-            val photo = model
+        } else {
+            AnimatedContent(
+                targetState = model,
+                transitionSpec = {
+                    if (transitionStyle == "cut") {
+                        EnterTransition.None togetherWith ExitTransition.None
+                    } else {
+                        EnterTransition.None togetherWith fadeOut(tween(transitionMs, easing = LinearEasing))
+                    }.apply { targetContentZIndex = -1f }
+                },
+                modifier = Modifier.fillMaxSize(),
+                contentKey = { it },
+                label = "slideshow-image-crossfade"
+            ) { photo ->
+            key(photo) {
             var photoAspect by remember(photo) { mutableFloatStateOf(0f) }
             val panX = remember(photo) { Animatable(0f) }
             val panY = remember(photo) { Animatable(0f) }
@@ -1471,9 +1492,9 @@ private fun PlaybackView(
                 val travelY = with(density) { ((imageHeight * 1.045f - maxHeight) / 2f).toPx().coerceAtLeast(0f) }
 
                 LaunchedEffect(photo, photoAspect, motionRequired, playing, paused, transitionInFlight, motionDuration, travelX, travelY) {
-                    // The black cover keeps transitions to one full-screen photo at a
-                    // time. Freeze the outgoing frame in place; initialize the incoming
-                    // frame at its first Ken Burns pose, then resume movement after fade-in.
+                    // Freeze the outgoing frame while it fades over the already-rendered
+                    // incoming image. The incoming image stays at its first Ken Burns pose
+                    // until the crossfade finishes, then begins its normal movement.
                     if (motionImage && playing && !paused && photo == model) {
                         val startX = if (horizontalOverflow) -travelX * direction else 0f
                         val startY = if (verticalOverflow) -travelY * direction else 0f
@@ -1535,9 +1556,8 @@ private fun PlaybackView(
                     }
                 )
             }
-        }
-        if (transitionCoverAlpha > 0f) {
-            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = transitionCoverAlpha.coerceIn(0f, 1f))))
+            }
+            }
         }
         if (showClock || showDate || showWeather && weatherLabel.isNotBlank() || calendarEvents.isNotEmpty() || phoneContent.hasContent || uploadUrl != null) {
             TimeWeatherOverlay(showClock, showDate, showWeather, weatherLabel, glassOverlay, imagePaddingDp, calendarEvents, phoneContent, uploadUrl, onOpenUploadQr)
@@ -1678,20 +1698,35 @@ private fun AgendaAndPhoneCard(
     dimmed: Boolean = false
 ) {
     val shape = RoundedCornerShape(16.dp)
+    val calendarTodos = events.asSequence()
+        .filter { it.kind == CalendarEventKind.TODO }
+        .sortedBy { it.startsAt.time }
+        .take(5)
+        .map { event -> PhoneTodo(calendarTodoDisplayText(event), false) }
+        .toList()
+    val displayedContent = content.copy(todos = calendarTodos + content.todos)
+    val agendaEvents = events.filterNot { it.kind == CalendarEventKind.TODO }
     val background = when {
         dimmed -> Modifier.clip(shape).background(Color(0x4420262D)).border(1.dp, Color(0x44565F69), shape)
         glass -> Modifier.clip(shape).background(Brush.linearGradient(listOf(Color(0x44FFFFFF), Color(0x66404D5A), Color(0xDD101820)))).border(1.dp, Color(0x668E9AAA), shape)
         else -> Modifier.clip(shape).background(Color(0xAA0E1116))
     }
-    val hasEvents = events.isNotEmpty()
-    val hasPhoneContent = content.hasContent
+    val hasEvents = agendaEvents.isNotEmpty()
+    val hasPhoneContent = displayedContent.hasContent
     Row(modifier.then(background).padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (hasEvents) CalendarAgenda(events, glass, Modifier.weight(1f).fillMaxHeight(), dimmed, drawCardBackground = false)
+        if (hasEvents) CalendarAgenda(agendaEvents, glass, Modifier.weight(1f).fillMaxHeight(), dimmed, drawCardBackground = false)
         if (hasEvents && hasPhoneContent) {
             Box(Modifier.width(1.dp).fillMaxHeight().background(if (dimmed) Color(0x333F464E) else Color(0x558E9AAA)))
         }
-        if (hasPhoneContent) PhoneListsCard(content, glass, Modifier.weight(1f).fillMaxHeight(), dimmed, drawCardBackground = false)
+        if (hasPhoneContent) PhoneListsCard(displayedContent, glass, Modifier.weight(1f).fillMaxHeight(), dimmed, drawCardBackground = false)
     }
+}
+
+private fun calendarTodoDisplayText(event: CalendarEvent): String {
+    val date = java.text.SimpleDateFormat("EEE d.M.", java.util.Locale.getDefault()).format(event.startsAt)
+    val time = if (event.allDay) "" else " · ${java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(event.startsAt)}"
+    val title = calendarTodoText(event.title) ?: event.title
+    return "$date$time · $title"
 }
 
 @Composable
@@ -1739,7 +1774,11 @@ private fun CalendarAgenda(events: List<CalendarEvent>, glass: Boolean, modifier
                     }
                     Icon(icon, contentDescription = description, tint = tint, modifier = Modifier.size(14.dp))
                     val eventDay = dayKey(event.startsAt, zone)
-                    val datePrefix = if (eventDay == today) "" else java.text.SimpleDateFormat("EEE d.M. · ", java.util.Locale.getDefault()).format(event.startsAt)
+                    val datePrefix = when {
+                        eventDay == today -> ""
+                        eventDay <= weekEnd -> java.text.SimpleDateFormat("EEE · ", java.util.Locale.getDefault()).format(event.startsAt)
+                        else -> java.text.SimpleDateFormat("EEE d.M. · ", java.util.Locale.getDefault()).format(event.startsAt)
+                    }
                     val time = if (event.allDay) "" else java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(event.startsAt) + " · "
                     Text("$datePrefix$time${event.title}", color = eventColor, fontSize = 10.sp, maxLines = 1, modifier = Modifier.padding(start = 5.dp))
                 }
@@ -1834,9 +1873,17 @@ private fun serializePhoneContent(content: PhoneContent): String = JSONObject()
     .put("todos", org.json.JSONArray().apply { content.todos.forEach { put(JSONObject().put("text", it.text).put("done", it.done)) } })
     .toString()
 
+private fun calendarTitleKey(title: String): String = java.text.Normalizer
+    .normalize(title, java.text.Normalizer.Form.NFKC)
+    .trim()
+    .replace(Regex("\\s+"), " ")
+    .lowercase(java.util.Locale.ROOT)
+
 private fun parseCalendarTitleList(raw: String?): List<String> = runCatching {
     val array = org.json.JSONArray(raw.orEmpty())
-    (0 until array.length()).mapNotNull { array.optString(it).trim().takeIf(String::isNotBlank) }.distinctBy { it.lowercase() }
+    (0 until array.length())
+        .mapNotNull { array.optString(it).trim().takeIf(String::isNotBlank) }
+        .distinctBy(::calendarTitleKey)
 }.getOrDefault(emptyList())
 
 private fun serializeCalendarSnapshot(events: List<CalendarEvent>, hiddenTitles: List<String>, manualBlacklist: String): String {

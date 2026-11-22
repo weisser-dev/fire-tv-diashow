@@ -10,7 +10,7 @@ import java.util.Locale
 import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 
-internal enum class CalendarEventKind { NORMAL, BIRTHDAY, GARBAGE }
+internal enum class CalendarEventKind { NORMAL, BIRTHDAY, GARBAGE, TODO }
 
 internal data class CalendarEvent(
     val title: String,
@@ -41,25 +41,47 @@ internal fun parseCalendarEvents(ics: String, now: Date = Date()): List<Calendar
         if ((line.startsWith(' ') || line.startsWith('\t')) && unfolded.isNotEmpty()) unfolded[unfolded.lastIndex] += line.drop(1)
         else unfolded += line
     }
-    val records = mutableListOf<MutableList<String>>()
+    val records = mutableListOf<Pair<String, MutableList<String>>>()
+    var currentComponent: String? = null
     var current: MutableList<String>? = null
     unfolded.forEach { line ->
         when (line.trim().uppercase(Locale.ROOT)) {
-            "BEGIN:VEVENT" -> current = mutableListOf()
-            "END:VEVENT" -> current?.let { records += it; current = null }
+            "BEGIN:VEVENT", "BEGIN:VTODO" -> {
+                currentComponent = line.substringAfter(':').uppercase(Locale.ROOT)
+                current = mutableListOf()
+            }
+            "END:VEVENT", "END:VTODO" -> current?.let {
+                records += (currentComponent ?: "VEVENT") to it
+                current = null
+                currentComponent = null
+            }
             else -> current?.add(line)
         }
     }
-    return records.flatMap { lines ->
+    return records.flatMap { (component, lines) ->
         val properties = lines.mapNotNull(::parseIcsProperty)
         val title = properties.firstOrNull { it.name == "SUMMARY" }?.value?.unescapeIcs().orEmpty().ifBlank { "Termin" }
-        val startProp = properties.firstOrNull { it.name == "DTSTART" } ?: return@flatMap emptyList()
+        val startProp = if (component == "VTODO") {
+            properties.firstOrNull { it.name == "DUE" } ?: properties.firstOrNull { it.name == "DTSTART" }
+        } else {
+            properties.firstOrNull { it.name == "DTSTART" }
+        } ?: return@flatMap emptyList()
+        val isTodo = component == "VTODO" || calendarTodoText(title) != null
+        if (component == "VTODO" && (properties.any { it.name == "STATUS" && it.value.equals("COMPLETED", true) } ||
+                properties.any { it.name == "PERCENT-COMPLETE" && it.value.toIntOrNull() == 100 })) {
+            return@flatMap emptyList()
+        }
         val start = parseIcsDate(startProp, zone) ?: return@flatMap emptyList()
         val isAllDay = startProp.params["VALUE"]?.equals("DATE", true) == true || startProp.value.length == 8
-        val rule = properties.firstOrNull { it.name == "RRULE" }?.value
-        val kind = classifyCalendarEvent(title, rule)
+        val rule = if (component == "VEVENT") properties.firstOrNull { it.name == "RRULE" }?.value else null
+        val kind = if (isTodo) CalendarEventKind.TODO else classifyCalendarEvent(title, rule)
         expandOccurrences(start, rule, from, through, zone).map { CalendarEvent(title, it, isAllDay, kind) }
     }.distinctBy { it.title to it.startsAt.time }.sortedBy { it.startsAt.time }
+}
+
+internal fun calendarTodoText(title: String): String? {
+    val match = Regex("(?i)^\\s*to\\s*[- ]?\\s*do\\b\\s*[:：\\-–—]?\\s*(.*)$").matchEntire(title) ?: return null
+    return match.groupValues[1].trim().replace(Regex("\\s+"), " ").ifBlank { "Todo" }
 }
 
 private data class IcsProperty(val name: String, val params: Map<String, String>, val value: String)

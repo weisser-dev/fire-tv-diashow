@@ -226,7 +226,7 @@ class LocalPhotoUploadServer(
         button{margin-top:18px;border:0;background:#e8c98c;color:#10141b;font-weight:750}button:disabled{opacity:.55}.status{min-height:2em;color:#42d9ff;white-space:pre-line}.note{font-size:13px;color:#9da8b6}
         </style></head><body><main><h1>Stillframe vom Handy verwalten</h1>
         <p>Aufgaben abhaken, Notizen pflegen oder neue Fotos direkt im selben WLAN an den Fernseher senden.</p>
-        <section><h2>Kalender</h2><p class="note">Kommende Termine ausblenden. Das Auge blendet alle Einträge mit demselben Titel aus, zum Beispiel eine wiederkehrende Serie.</p><div id="calendar-events"></div><p class="calendar-status" id="calendar-status" aria-live="polite"></p></section>
+        <section><h2>Kalender</h2><p class="note">Kommende Termine ausblenden. Das Auge blendet alle Einträge mit demselben Titel aus, zum Beispiel eine wiederkehrende Serie. Kalendertitel mit „TODO:“ oder „To do:“ erscheinen rechts zusätzlich als Aufgabe mit Datum.</p><div id="calendar-events"></div><p class="calendar-status" id="calendar-status" aria-live="polite"></p></section>
         <div class="lists"><section><h2>Aufgaben</h2><div id="todos"></div><div class="entry"><input id="todo-input" maxlength="$MAX_NOTE_CHARACTERS" placeholder="Neue Aufgabe"><button type="button" id="add-todo">Aufgabe hinzufügen</button></div></section>
         <section><h2>Notizen</h2><div id="notes"></div><div class="entry"><input id="note-input" maxlength="$MAX_NOTE_CHARACTERS" placeholder="Neue Notiz"><button type="button" id="add-note">Notiz hinzufügen</button></div></section></div>
         <p class="status" id="content-status" aria-live="polite"></p><pre id="initial-data" class="hidden">${html(phoneContent)}</pre>
