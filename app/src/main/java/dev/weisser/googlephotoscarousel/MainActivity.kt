@@ -181,7 +181,8 @@ class MainActivity : ComponentActivity() {
             var seconds by remember { mutableIntStateOf(prefs.getInt("seconds", 8).coerceIn(5, 60)) }
             var motionSeconds by remember { mutableIntStateOf(prefs.getInt("motion_seconds", 30)) }
             var shuffle by remember { mutableStateOf(prefs.getBoolean("shuffle", false)) }
-            var photoHistory by remember { mutableStateOf(loadPhotoHistory(prefs.getString("photo_history", null))) }
+            var photoHistory by remember { mutableStateOf<Map<String, PhotoHistory>>(emptyMap()) }
+            var photoHistoryLoaded by remember { mutableStateOf(false) }
             var lastRecordedSlide by remember { mutableStateOf<String?>(null) }
             var loadedNextPhoto by remember { mutableStateOf<String?>(null) }
             var failedPreloadPhotos by remember { mutableStateOf<Set<String>>(emptySet()) }
@@ -326,20 +327,36 @@ class MainActivity : ComponentActivity() {
                 focusedPhotoIndex = focusedPhotoIndex.coerceIn(0, (images.size - 1).coerceAtLeast(0))
                 if (images.isEmpty()) photoManagerTarget = "clear"
             }
-            LaunchedEffect(images.toList(), index, playing) {
-                val updated = photoHistory.toMutableMap()
+            LaunchedEffect(Unit) {
+                val savedHistory = prefs.getString("photo_history", null)
+                photoHistory = withContext(Dispatchers.IO) { loadPhotoHistory(savedHistory) }
+                photoHistoryLoaded = true
+            }
+            LaunchedEffect(images.toList(), photoHistoryLoaded) {
+                if (!photoHistoryLoaded) return@LaunchedEffect
                 val now = System.currentTimeMillis()
-                images.forEach { if (!updated.containsKey(it)) updated[it] = PhotoHistory(now, 0, 0L) }
-                if (playing) images.getOrNull(index)?.let { model ->
-                    val slideKey = "$index:$model"
-                    if (lastRecordedSlide == slideKey) return@let
-                    val old = updated[model] ?: PhotoHistory(now, 0, 0L)
-                    updated[model] = old.copy(viewCount = old.viewCount + 1, lastViewedAt = now)
-                    lastRecordedSlide = slideKey
+                val missing = images.filterNot(photoHistory::containsKey)
+                if (missing.isNotEmpty()) {
+                    photoHistory = photoHistory + missing.associateWith { PhotoHistory(now, 0, 0L) }
                 }
-                if (updated != photoHistory) {
-                    photoHistory = updated
-                    prefs.edit().putString("photo_history", savePhotoHistory(updated)).apply()
+            }
+            LaunchedEffect(images.toList(), index, playing, photoHistoryLoaded) {
+                if (!photoHistoryLoaded || !playing) return@LaunchedEffect
+                val model = images.getOrNull(index) ?: return@LaunchedEffect
+                val slideKey = "$index:$model"
+                if (lastRecordedSlide == slideKey) return@LaunchedEffect
+                val now = System.currentTimeMillis()
+                val old = photoHistory[model] ?: PhotoHistory(now, 0, 0L)
+                photoHistory = photoHistory + (model to old.copy(viewCount = old.viewCount + 1, lastViewedAt = now))
+                lastRecordedSlide = slideKey
+            }
+            LaunchedEffect(photoHistory, photoHistoryLoaded) {
+                if (!photoHistoryLoaded) return@LaunchedEffect
+                delay(750)
+                val snapshot = photoHistory
+                val serialized = withContext(Dispatchers.Default) { savePhotoHistory(snapshot) }
+                withContext(Dispatchers.IO) {
+                    prefs.edit().putString("photo_history", serialized).apply()
                 }
             }
             LaunchedEffect(uploadAlbums, selectedUploadAlbum) {
@@ -1111,7 +1128,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun refreshUploadedPhotos() {
-        uploadedPhotos = LocalPhotoUploadServer.scan(filesDir)
+        lifecycleScope.launch(Dispatchers.IO) {
+            val photos = LocalPhotoUploadServer.scan(filesDir)
+            withContext(Dispatchers.Main) { uploadedPhotos = photos }
+        }
     }
 
     private fun startPhotoUpload(showDialog: Boolean = true) {
@@ -1125,7 +1145,7 @@ class MainActivity : ComponentActivity() {
             onPhotoUploaded = { _, _ ->
                 runOnUiThread {
                     refreshUploadedPhotos()
-                    uploadStatus = "${uploadedPhotos.size} Bilder empfangen. Du kannst weitere senden."
+                    uploadStatus = "Bild empfangen. Du kannst weitere senden."
                 }
             },
             readPhoneContent = {
