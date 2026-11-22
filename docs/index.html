@@ -1,49 +1,545 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#10141b">
-  <title>Stillframe — photos on your big screen</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#10141b">
+  <title>Stillframe — optimized for Fire TV</title>
   <style>
     :root{color-scheme:dark;--bg:#10141b;--panel:#191f29;--line:#303947;--ink:#f6f3ec;--muted:#aab3bf;--gold:#e8c98c;--blue:#a9caff;font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
-    *{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 70% 0%,#26344a 0,transparent 40%),var(--bg);color:var(--ink);line-height:1.55}.wrap{width:min(1120px,calc(100% - 36px));margin:auto}.top{display:flex;justify-content:space-between;align-items:center;padding:22px 0;border-bottom:1px solid #ffffff18}.brand{font-size:.9rem;letter-spacing:.16em;font-weight:800;color:var(--gold)}a{color:var(--blue)}.hero{padding:56px 0 30px;max-width:790px}.kicker{font-size:.78rem;letter-spacing:.16em;color:var(--gold);font-weight:800;text-transform:uppercase}.hero h1{font-size:clamp(2.5rem,7vw,5rem);line-height:1.02;letter-spacing:-.05em;margin:12px 0 20px}.hero p{font-size:1.15rem;color:#c8d0da;max-width:700px}.button{display:inline-flex;align-items:center;gap:9px;background:var(--gold);color:#171a1f;text-decoration:none;padding:13px 20px;border-radius:12px;font-weight:800;margin-top:12px}.panel{background:#171d26ed;border:1px solid var(--line);border-radius:22px;padding:clamp(18px,3vw,30px);box-shadow:0 26px 80px #0005}.demo{margin:28px auto 70px}.demohead{display:flex;justify-content:space-between;gap:20px;align-items:end;margin-bottom:20px}.demohead h2{font-size:1.8rem;margin:0}.demohead p{color:var(--muted);margin:4px 0 0}.tag{color:var(--gold);font-size:.8rem;border:1px solid #e8c98c66;border-radius:99px;padding:5px 10px;white-space:nowrap}.stage{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(260px,.7fr);gap:24px;align-items:center}.framewrap{background:#0b0d11;padding:14px;border-radius:22px;box-shadow:inset 0 0 0 1px #39414e,0 18px 42px #0006}.frame{position:relative;container-type:inline-size;aspect-ratio:16/9;background:#08090c;border-radius:12px;overflow:hidden;display:grid;place-items:center;transition:aspect-ratio .3s}.frame.portrait{aspect-ratio:9/16;max-height:68vh;width:min(100%,420px);margin:auto}.photo{position:absolute;inset:0;height:100%;width:100%;object-fit:contain;transition:opacity .6s,transform 8s ease;opacity:1}.photo#photo{z-index:0}.photo.next-photo{z-index:1;opacity:0;pointer-events:none}.photo.fill{object-fit:cover}.photo.zoom{transform:scale(1.08)}.photo.pan{position:absolute;left:0;top:50%;height:110%;width:auto;max-width:none;object-fit:initial;animation:pan-sweep var(--sweep-duration,15s) linear infinite alternate;animation-direction:var(--sweep-direction,normal)}.photo.fadeout{opacity:0}.frame.slideshow-slide img:not(.pan){animation:slidein .7s ease}.frame.slideshow-zoom img:not(.pan){animation:demozoom 1.2s ease}@keyframes demozoom{from{transform:scale(.96);opacity:.6}to{transform:scale(1);opacity:1}}@keyframes pan-sweep{from{transform:translate3d(0,-50%,0) scale(1.01)}to{transform:translate3d(var(--pan-end,-20px),-50%,0) scale(1.04)}}@keyframes slidein{from{transform:translateX(8%);opacity:.4}to{transform:translateX(0);opacity:1}}.screen-label{position:absolute;top:12px;left:12px;background:#0009;padding:5px 9px;border-radius:7px;font-size:.72rem;letter-spacing:.1em}.controls{display:flex;gap:8px;align-items:center;justify-content:center;margin-top:13px}.iconbtn,select,button{font:inherit;color:var(--ink);background:#252d39;border:1px solid #3d4858;border-radius:10px;padding:9px 12px}.iconbtn{cursor:pointer;min-width:44px}.controls .play{background:var(--gold);border-color:var(--gold);color:#191b20;font-weight:800}.settings{display:grid;gap:16px}.setting label{display:flex;justify-content:space-between;gap:10px;font-size:.92rem;font-weight:700}.setting small{display:block;color:var(--muted);font-size:.8rem;margin-top:3px}.setting select{width:100%;margin-top:8px}.setting input{width:100%;accent-color:var(--gold);margin-top:11px}.thumbs{display:flex;gap:10px;overflow:auto;margin-top:17px;padding:2px 1px 8px}.thumb{flex:0 0 102px;height:68px;border:2px solid transparent;border-radius:9px;overflow:hidden;padding:0;background:none;cursor:pointer}.thumb.active{border-color:var(--gold)}.thumb img{height:100%;width:100%;object-fit:cover}.caption{color:var(--muted);font-size:.82rem;margin-top:8px}.demo-extras{margin-top:20px;display:grid;gap:12px}.demo-actions,.weather-place{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.demo-actions label,.weather-place label{display:flex;align-items:center;gap:6px;color:var(--muted)}.demo-actions input[type=checkbox]{accent-color:var(--gold)}.weather-place input{width:82px;padding:7px 9px;background:#10141b;color:var(--ink);border:1px solid var(--line);border-radius:8px}.weather-place span{font-size:.8rem;color:var(--muted)}.context-menu{display:flex;gap:8px;flex-wrap:wrap;padding:14px;border:1px solid var(--line);border-radius:12px;background:#0e131a}.context-menu b{width:100%}.context-menu[hidden],[hidden]{display:none!important}.sleep-overlay{position:absolute;inset:0;z-index:3;background:#000;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;color:#f6f3ec}.sleep-overlay strong{font-size:clamp(2.5rem,8vw,5rem);font-weight:300}.sleep-overlay span{color:#c8d0da}.weather-line{display:inline-flex;align-items:center;gap:7px}.weather-line svg{width:20px;height:20px}.frame.sleeping .photo,.frame.sleeping .screen-label{visibility:hidden}.features{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:0 0 56px}.feature{padding:19px;border:1px solid var(--line);border-radius:16px;background:#161c24}.feature b{display:block;margin-bottom:4px}.feature span{font-size:.9rem;color:var(--muted)}footer{border-top:1px solid #ffffff18;padding:24px 0 38px;color:var(--muted);font-size:.88rem}button:focus-visible,a:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid white;outline-offset:3px}
-    @media(max-width:760px){.stage{grid-template-columns:1fr}.frame.portrait{max-height:58vh}.features{grid-template-columns:1fr}.demohead{align-items:start;flex-direction:column}.hero{padding-top:38px}}
-  .note-overlay{position:absolute;z-index:4;left:2.5cqw;bottom:2.5cqw;width:min(42cqw,170px);padding:2.6cqw 3cqw;border:1px solid #ffffff55;border-radius:4cqw;background:#111923d9;color:#f6f3ec;box-shadow:0 4px 10px #0005;font-size:2.2cqw;line-height:1.35;white-space:pre-wrap;overflow-wrap:anywhere}.note-overlay.glass-panel{background:linear-gradient(135deg,#ffffff44,#596e8266 44%,#11192399);backdrop-filter:blur(14px) saturate(140%)}.frame.sleeping .note-overlay{color:#9ba2aa;border-color:#555;background:#17191dcc;box-shadow:none}.calendar-overlay{position:absolute;z-index:4;left:2.5cqw;bottom:2.5cqw;width:min(42cqw,170px);padding:2.6cqw 3cqw;border:1px solid #ffffff55;border-radius:4cqw;background:#111923d9;color:#f6f3ec;box-shadow:0 4px 10px #0005;font-size:2.15cqw;line-height:1.35}.calendar-overlay.glass-panel{background:linear-gradient(135deg,#ffffff44,#596e8266 44%,#11192399);backdrop-filter:blur(14px) saturate(140%)}.calendar-title{font-weight:700;margin-bottom:1.5cqw}.calendar-group{margin-top:1.5cqw}.calendar-group b{display:block;color:#f2d48e;font-size:1.85cqw;text-transform:uppercase;letter-spacing:.08em;margin-bottom:.5cqw}.calendar-event{display:flex;align-items:center;gap:1.5cqw;margin:.7cqw 0}.calendar-event svg{width:3.2cqw;height:3.2cqw;flex:none;color:#f2d48e}.frame.sleeping .calendar-overlay{color:#9ba2aa;border-color:#555;background:#17191dcc;box-shadow:none}.frame.sleeping .calendar-event svg{color:#9ba2aa}.photo-hud{position:absolute;z-index:2;right:2.5cqw;top:2.5cqw;display:flex;flex-direction:column;align-items:flex-end;gap:.8cqw;color:#fff;text-shadow:0 1px 4px #000;font-size:2.05cqw;line-height:1.3}.photo-hud strong{font-size:4.2cqw;font-weight:500}.photo-hud .weather-line svg{width:2.6cqw;height:2.6cqw}.photo-hud.glass-panel{padding:2.4cqw 3cqw;border-radius:4cqw}.glass-panel{padding:2.4cqw 3cqw;border:1px solid #ffffff66;border-radius:4cqw;background:linear-gradient(135deg,#ffffff44,#596e8266 44%,#11192399);box-shadow:0 8px 20px #0004;backdrop-filter:blur(14px) saturate(140%)}
-    .actual-shot{display:grid;grid-template-columns:1fr minmax(200px,430px);gap:24px;align-items:center;margin-bottom:24px}.shot-gallery{display:grid;grid-template-columns:1fr 1fr;gap:10px}.actual-shot img{width:100%;height:auto;border-radius:14px;border:1px solid var(--line);box-shadow:0 18px 42px #0006}
-    @media(max-width:760px){.actual-shot{grid-template-columns:1fr}}
+    *{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 70% 0%,#26344a 0,transparent 40%),var(--bg);color:var(--ink);line-height:1.55}.wrap{width:min(1120px,calc(100% - 36px));margin:auto}.top{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:22px 0;border-bottom:1px solid #ffffff18}.brand{font-size:.9rem;letter-spacing:.16em;font-weight:800;color:var(--gold)}a{color:var(--blue)}.top-label{font-size:.76rem;letter-spacing:.12em;color:var(--muted);font-weight:750}.hero{padding:52px 0 26px;max-width:790px}.kicker{font-size:.78rem;letter-spacing:.16em;color:var(--gold);font-weight:800;text-transform:uppercase}.hero h1{font-size:clamp(2.5rem,7vw,5rem);line-height:1.02;letter-spacing:-.05em;margin:12px 0 20px}.hero p{font-size:1.15rem;color:#c8d0da;max-width:700px}.button{display:inline-flex;align-items:center;gap:9px;background:var(--gold);color:#171a1f;text-decoration:none;padding:13px 20px;border-radius:12px;font-weight:800;margin-top:12px}.panel{background:#171d26ed;border:1px solid var(--line);border-radius:22px;padding:clamp(18px,3vw,30px);box-shadow:0 26px 80px #0005}.demo{margin:28px auto 54px}.demohead{display:flex;justify-content:space-between;gap:20px;align-items:end;margin-bottom:20px}.demohead h2{font-size:1.8rem;margin:0}.demohead p{color:var(--muted);margin:4px 0 0}.tag{color:var(--gold);font-size:.8rem;border:1px solid #e8c98c66;border-radius:99px;padding:5px 10px;white-space:nowrap}.stage{display:grid;grid-template-columns:minmax(300px,440px) minmax(280px,1fr);gap:28px;align-items:start}.tv-column{display:flex;flex-direction:column;align-items:center}.tv-shell{width:max-content;max-width:100%;padding:13px;border:1px solid #343b47;border-radius:26px;background:linear-gradient(145deg,#161a20,#050608 58%);box-shadow:0 24px 55px #0008,inset 0 1px #ffffff1c}.frame{position:relative;container-type:inline-size;width:min(100%,400px,calc(75vh * 9 / 16));height:auto;aspect-ratio:9/16;background:#08090c;border-radius:11px;overflow:hidden;isolation:isolate}.frame.landscape{width:min(100%,560px);aspect-ratio:16/9}.screen-content{position:absolute;inset:0;overflow:hidden}.photo{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;z-index:0}.photo.fill{object-fit:cover}.photo.pan{left:0;top:50%;height:110%;width:auto;max-width:none;object-fit:initial;animation:pan-sweep var(--sweep-duration,24s) linear forwards;animation-direction:var(--sweep-direction,normal)}.photo.zoom{object-fit:cover;animation:slow-zoom var(--sweep-duration,24s) linear forwards;animation-direction:var(--sweep-direction,normal)}@keyframes pan-sweep{from{transform:translate3d(0,-50%,0) scale(1.01)}to{transform:translate3d(var(--pan-end,-30px),-50%,0) scale(1.045)}}@keyframes slow-zoom{from{transform:scale(1)}to{transform:scale(1.045)}}.transition-cover{position:absolute;z-index:1;inset:0;background:#000;opacity:0;pointer-events:none;transition:opacity 280ms linear}.screen-label{position:absolute;z-index:2;left:2.5cqw;top:2.5cqw;color:#f6f3ecaa;font-size:2cqw;letter-spacing:.13em;text-shadow:0 1px 4px #000}.top-hud{position:absolute;z-index:3;inset:2.5cqw 2.5cqw auto;display:flex;justify-content:space-between;align-items:flex-start;gap:8px;color:#fff;text-shadow:0 1px 4px #000;font-size:2.2cqw;line-height:1.3}.clock-chip,.date-chip{border:1px solid #ffffff55;border-radius:3.5cqw;background:#20283288;padding:1.7cqw 2.6cqw;backdrop-filter:blur(10px)}.clock-chip{font-size:3.5cqw;font-weight:650}.date-chip{text-align:right;font-size:1.9cqw}.date-chip span{display:block}.date-chip .weather-line{margin-top:.7cqw}.weather-line{display:inline-flex;align-items:center;gap:.8cqw}.weather-line svg{width:2.7cqw;height:2.7cqw;flex:none}.agenda-overlay{position:absolute;z-index:4;left:2.5cqw;right:2.5cqw;bottom:2.5cqw;display:grid;grid-template-columns:1.15fr .85fr;gap:2cqw;padding:2.4cqw;border:1px solid #ffffff66;border-radius:3.5cqw;background:linear-gradient(135deg,#ffffff38,#596e8260 44%,#111923ba);color:#fff;box-shadow:0 5px 18px #0005;backdrop-filter:blur(9px);font-size:1.85cqw;line-height:1.35}.agenda-overlay.glass-panel,.clock-chip.glass-panel,.date-chip.glass-panel{background:linear-gradient(135deg,#ffffff35,#4b5c6d66 48%,#111923c9);backdrop-filter:blur(12px) saturate(130%)}.agenda-col{min-width:0}.agenda-col+.agenda-col{border-left:1px solid #ffffff55;padding-left:2cqw}.agenda-heading{font-weight:750;color:#f2d48e;margin-bottom:1.1cqw}.agenda-row{display:flex;align-items:flex-start;gap:1cqw;margin:.7cqw 0;overflow-wrap:anywhere}.agenda-row svg{width:2.5cqw;height:2.5cqw;flex:none;color:#f2d48e}.agenda-note{color:#f4f2ec;margin-top:.9cqw}.qr-badge{position:absolute;z-index:8;right:2.5cqw;bottom:2.5cqw;width:9cqw;height:9cqw;display:grid;place-items:center;cursor:pointer;filter:drop-shadow(0 1px 2px #ffffffaa);border:0;background:transparent;padding:0}.qr-badge svg{width:100%;height:100%;fill:#10141b}.frame.sleeping .qr-badge{right:auto;bottom:auto;left:50%;top:18%;width:4cqw;height:4cqw;transform:translateX(-50%);filter:grayscale(1);opacity:.72}.frame.sleeping .qr-badge svg{fill:#858d96}.playback-controls{position:absolute;z-index:5;left:50%;bottom:2.5cqw;transform:translateX(-50%);display:flex;align-items:center;gap:1cqw;padding:.8cqw 1.8cqw;border:1px solid #ffffff26;border-radius:99px;background:#0e1116bb;color:#fff;font-size:2.1cqw}.playback-controls button{font:inherit;color:#fff;border:0;background:transparent;padding:.5cqw 1.2cqw;cursor:pointer}.playback-controls .pause-symbol{color:var(--gold)}.screen-count{white-space:nowrap;padding:0 1cqw}.sleep-overlay{position:absolute;z-index:7;inset:0;background:#050607;display:flex;flex-direction:column;align-items:center;padding:27% 7% 7%;color:#737b85;text-align:center}.sleep-clock{font-size:10cqw;font-weight:350;line-height:1.1}.sleep-date,.sleep-weather{font-size:3.4cqw;margin-top:1.2cqw}.sleep-agenda{margin-top:auto;width:100%;max-height:35%;overflow:hidden;text-align:left;display:grid;grid-template-columns:1fr 1fr;gap:2cqw;padding:2.5cqw;border:1px solid #505761aa;border-radius:3cqw;background:#17191dcc;font-size:2cqw}.sleep-agenda .agenda-heading,.sleep-agenda .agenda-row svg{color:#858d96}.pause-menu{position:absolute;z-index:9;inset:0;display:grid;place-items:center;background:#000b;padding:5%}.pause-card{width:min(88%,410px);max-height:90%;overflow:auto;padding:5%;border:1px solid #738094;border-radius:5cqw;background:#1b2634f2;box-shadow:0 12px 36px #0009}.pause-card h3{margin:0 0 3cqw;color:var(--gold);font-size:4cqw}.pause-option{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;margin:1.2cqw 0;padding:2.2cqw 2.8cqw;border:1px solid #445365;border-radius:2.6cqw;background:#242f3d;color:#fff;text-align:left;font-size:2.8cqw;cursor:pointer}.pause-option.active{outline:2px solid #42d9ff;background:#153744}.frame.sleeping .screen-label,.frame.sleeping .photo,.frame.sleeping .playback-controls,.frame.sleeping .agenda-overlay{visibility:hidden}.frame.rotated .screen-content{transform:rotate(180deg)}.controls{display:flex;gap:8px;align-items:center;justify-content:center;margin-top:13px}.iconbtn,select,button{font:inherit;color:var(--ink);background:#252d39;border:1px solid #3d4858;border-radius:10px;padding:9px 12px}.iconbtn{cursor:pointer;min-width:44px}.controls .play{background:var(--gold);border-color:var(--gold);color:#191b20;font-weight:800}.thumbs{display:flex;gap:10px;overflow:auto;margin-top:17px;padding:2px 1px 8px;width:100%}.thumb{flex:0 0 82px;height:58px;border:2px solid transparent;border-radius:9px;overflow:hidden;padding:0;background:none;cursor:pointer}.thumb.active{border-color:var(--gold)}.thumb img{height:100%;width:100%;object-fit:cover}.caption{color:var(--muted);font-size:.82rem;margin-top:8px}.settings{display:grid;gap:14px}.setting{padding-bottom:12px;border-bottom:1px solid #ffffff12}.setting label{display:flex;justify-content:space-between;gap:10px;font-size:.92rem;font-weight:700}.setting small{display:block;color:var(--muted);font-size:.8rem;margin-top:4px}.setting select{width:100%;margin-top:8px}.setting input[type=range]{width:100%;accent-color:var(--gold);margin-top:11px}.demo-extras{margin-top:16px;display:grid;gap:12px}.demo-actions,.weather-place{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.demo-actions label,.weather-place label{display:flex;align-items:center;gap:6px;color:var(--muted)}.demo-actions input[type=checkbox],.weather-place input[type=checkbox]{accent-color:var(--gold)}.weather-place input:not([type=checkbox]){width:82px;padding:7px 9px;background:#10141b;color:var(--ink);border:1px solid var(--line);border-radius:8px}.weather-place span{font-size:.8rem;color:var(--muted)}.context-menu{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:14px;border:1px solid var(--line);border-radius:12px;background:#0e131a}.context-menu b{grid-column:1/-1}.context-menu[hidden],[hidden]{display:none!important}.phone-panel{padding:16px;border:1px solid var(--line);border-radius:15px;background:#10151d}.phone-panel h3{margin:0 0 8px}.phone-panel p,.caption{color:var(--muted)}.phone-series{display:grid;grid-template-columns:1fr auto;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid #ffffff16}.eye-button{width:42px;padding:7px;color:var(--gold);font-size:1.1rem}.eye-button.off{color:#8a939f}.features{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:0 0 50px}.feature{padding:19px;border:1px solid var(--line);border-radius:16px;background:#161c24}.feature b{display:block;margin-bottom:4px}.feature span{font-size:.9rem;color:var(--muted)}.actual-shot{display:grid;grid-template-columns:1fr minmax(200px,430px);gap:24px;align-items:center;margin-bottom:24px}.shot-gallery{display:grid;grid-template-columns:1fr 1fr;gap:10px}.actual-shot img{width:100%;height:auto;border-radius:14px;border:1px solid var(--line);box-shadow:0 18px 42px #0006}footer{border-top:1px solid #ffffff18;padding:24px 0 38px;color:var(--muted);font-size:.88rem}button:focus-visible,a:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid white;outline-offset:3px}
+    @media(max-width:820px){.stage{grid-template-columns:1fr}.tv-shell{max-width:100%}.frame{width:min(100%,calc(65vh * 9 / 16))}.frame.landscape{height:auto;width:min(100%,560px)}.settings{margin-top:4px}.features{grid-template-columns:1fr 1fr}.demohead{align-items:start;flex-direction:column}.hero{padding-top:38px}}
+    @media(max-width:520px){.features{grid-template-columns:1fr}.top-label{font-size:.66rem}.frame{width:min(100%,calc(58vh * 9 / 16))}.panel{padding:16px}.demohead h2{font-size:1.5rem}}
+    .qr-badge{z-index:8}.pause-menu{z-index:9}
+    .date-chip{display:flex;align-items:center;gap:1.2cqw}.date-info{flex:1;min-width:0;text-align:right}.date-chip .weather-line{display:inline-flex}.date-chip .qr-badge{position:static;flex:none;width:8cqw;height:8cqw;transform:none;filter:none;margin:0}.sleep-qr{width:4cqw;height:4cqw;flex:none;padding:0;margin:0 0 1cqw;background:transparent;border:0;filter:grayscale(1);opacity:.72}.sleep-qr svg{width:100%;height:100%;fill:#858d96}.frame.sleeping .qr-badge{position:static;left:auto;right:auto;top:auto;bottom:auto;transform:none}.playback-controls{transition:opacity .35s}.frame.controls-hidden .playback-controls{opacity:0;pointer-events:none}
   </style>
 </head>
-<body><div class="wrap">
-  <header class="top"><div class="brand">STILLFRAME</div><a href="https://github.com/weisser-dev/fire-tv-diashow">GitHub ↗</a></header>
+<body>
+<div class="wrap">
+  <header class="top"><div class="brand">STILLFRAME</div><div class="top-label">OPTIMIZED FOR FIRE TV</div><a href="https://github.com/weisser-dev/fire-tv-diashow">GitHub ↗</a></header>
   <main>
-    <section class="hero"><div class="kicker">Android TV · Fire TV</div><h1>Your photos on the big screen.</h1><p>A calm slideshow that preloads the next photo and keeps your TV awake. Organize local photos into albums, add pictures from your phone with a QR code, and let your memories play smoothly.</p><a class="button" href="https://github.com/weisser-dev/fire-tv-diashow/releases/latest/download/app-release.apk">↓ Download the latest APK</a></section>
-    <section class="panel demo" aria-label="Interactive slideshow demo"><div class="demohead"><div><div class="kicker">LIVE PREVIEW</div><h2>See your slideshow in action</h2><p>Try portrait or landscape, smooth preloaded transitions, shuffle, and image fitting.</p></div><span class="tag">5 sample photos</span></div>
-      <div class="stage"><div><div class="framewrap"><div class="frame" id="frame"><img class="photo" id="photo" src="demo/coastal-cliffs.jpg" alt="Coast and cliffs at sunset"><img class="photo next-photo" id="nextPhoto" src="demo/redwood-forest.jpg" alt="" aria-hidden="true"><span class="screen-label">STILLFRAME · DEMO</span><div class="calendar-overlay" id="calendarOverlay" hidden></div><div class="note-overlay" id="noteOverlay" hidden></div></div></div><div class="controls"><button class="iconbtn" id="prev" aria-label="Previous photo">‹</button><button class="iconbtn play" id="play">▶ Play</button><button class="iconbtn" id="next" aria-label="Next photo">›</button><span id="count" class="caption">1 / 5</span></div><div class="thumbs" id="thumbs" aria-label="Choose a demo photo"></div><div class="caption" id="caption">Coast at sunset</div></div>
-        <div class="settings"><div class="setting"><label for="orientation">Orientation</label><select id="orientation"><option value="landscape">Landscape · 16:9</option><option value="portrait">Portrait · 9:16</option></select><small>Even when the Fire TV output itself stays in landscape.</small></div><div class="setting"><label for="transition">Transition</label><select id="transition"><option value="fade">Soft fade</option><option value="crossfade">Slow crossfade</option><option value="cut">Cut</option><option value="slide">Gentle slide</option><option value="zoom">Soft zoom</option></select></div><div class="setting"><label for="motionDuration">Pan duration <span><output id="motionOut">30</output> sec</span></label><input id="motionDuration" type="range" min="15" max="60" step="15" value="30"><small>Slow pan for photos that do not match the screen shape.</small></div><div class="setting"><label for="duration">Photo duration <span><output id="durationOut">6</output> sec</span></label><input id="duration" type="range" min="5" max="20" value="6"><small>How long each photo stays on screen.</small></div><div class="setting"><label for="fit">Image fit</label><select id="fit"><option value="fit">Fit</option><option value="fill">Fill</option><option value="stretch">Stretch</option><option value="ken_burns" selected>Ken Burns · zoom &amp; pan</option></select><small>Motion is slow and independent from the still time. Photos with a mismatched aspect ratio pan across the full image.</small></div></div>
-      <div class="demo-extras">
-        <div class="demo-actions"><button class="iconbtn" id="contextToggle">☰ Options</button><button class="iconbtn" id="shuffleToggle">Shuffle off</button><button class="iconbtn" id="sleepNow">☾ Sleep now</button><button class="iconbtn" id="wakeNow" hidden>☀ Wake up</button><label><input id="showClock" type="checkbox" checked> Clock</label><label><input id="showDate" type="checkbox"> Date</label><label><input id="showWeather" type="checkbox"> Weather</label><label><input id="useGlass" type="checkbox"> Liquid Glass</label><label><input id="showCalendar" type="checkbox"> Calendar</label><label><input id="showNotes" type="checkbox"> Note</label><label>Sleep timer <select id="sleepTimer"><option value="0">Off</option><option value="15">15 min</option><option value="30">30 min</option><option value="60">60 min</option></select></label></div>
-        <div class="weather-place"><label for="demoNote">Demo note <input id="demoNote" value="Welcome home" maxlength="120" aria-label="Demo note text"></label><span>Displayed on the TV preview · stays in this browser only.</span></div>
-        <div class="weather-place"><label>Country <input id="weatherCountry" value="DE" maxlength="2" aria-label="Country code"></label><label>Postal code <input id="weatherPostal" value="10115" aria-label="Postal code"></label><span>Sample display · the app loads public weather data.</span></div>
-        <div class="weather-place"><label><input id="scheduleEnabled" type="checkbox"> Schedule</label><label>Days <select id="scheduleDays"><option value="weekdays">Mon–Fri</option><option value="daily">Daily</option></select></label><label>From <input id="scheduleStart" type="time" value="16:00"></label><label>To <input id="scheduleEnd" type="time" value="21:00"></label><span>Sleep outside these hours · example: weekdays, 4–9 pm</span></div>
-        <div class="context-menu" id="contextMenu" hidden><b>Slideshow paused · options</b><button data-action="resume">Resume</button><button data-action="shuffle">Toggle shuffle</button><button data-action="upload">Add photos by QR code</button><button data-action="speed">Change photo duration</button><button data-action="transition">Change transition</button><button data-action="fit">Change image fit</button><button data-action="sleep">Sleep now</button></div>
-      </div></div>
-    </section>
-    <section class="features"><div class="feature"><b>Personal notes</b><span>Keep a short message visible over photos or on the sleep screen. Notes are stored locally on the TV and never sent to the demo.</span></div><div class="feature"><b>Calendar at a glance</b><span>Show today, this week, and upcoming events in a subtle overlay. Birthday and collection reminders have distinct icons; connect an iCal feed in the app.</span></div><div class="feature"><b>Made for continuous playback</b><span>The screen stays awake during playback.</span></div><div class="feature"><b>Portrait or landscape</b><span>The app, menus, and remote navigation follow the selected orientation.</span></div><div class="feature"><b>Smart shuffle</b><span>Random playback with locally saved view counts. New and less-seen photos get priority.</span></div><div class="feature"><b>TV photo albums</b><span>Organize local photos, add more from your phone, and manage them while the slideshow is running.</span></div><div class="feature"><b>Sleep screen with clock</b><span>Set a schedule, sleep now, or wake the display at any time. Clock, date, weather, and glass styling are optional.</span></div></section>
-    <section class="panel actual-shot"><div><div class="kicker">REAL DEVICE CAPTURES</div><h2>Running on a portrait Fire TV</h2><p>Captured directly from the Fire TV over ADB. Both example screens avoid photos with people.</p></div><div class="shot-gallery"><img src="screenshots/firetv-portrait-controls.png" alt="Stillframe slideshow controls on the portrait Fire TV, showing a goat outdoors"><img src="screenshots/firetv-portrait-sleep.png" alt="Stillframe sleep screen with clock, date, and weather on a portrait Fire TV"></div></section>
-    <section class="panel"><div class="kicker">INSTALL ON FIRE TV</div><h2>Download and install the APK</h2><p>Open this address in Downloader, get the APK, and allow Downloader to install unknown apps when prompted:</p><code>https://github.com/weisser-dev/fire-tv-diashow/releases/latest/download/app-release.apk</code><p class="caption">Photos stay on your TV. Phone uploads work on the same Wi-Fi network; an optional PIN protects uploads.</p></section>
-  </main><footer>Stillframe · <a href="https://github.com/weisser-dev/fire-tv-diashow">Source code, releases, and help</a></footer>
-</div>
-<script>
-  const items=[['coastal-cliffs.jpg','Coast at sunset','Coast and cliffs at sunset'],['redwood-forest.jpg','Redwood forest','Sunlight through towering redwood trees'],['japanese-garden.jpg','Japanese garden','Japanese garden with a pond and red bridge'],['desert-dunes.jpg','Desert dunes','Golden dunes in warm evening light'],['alpine-lake.jpg','Alpine lake','Clear alpine lake beneath snow-capped mountains']];
-  let index=0,timer=null,sleeping=false,manualSleep=false,sleepTimeout=null,scheduleTimer=null,shuffle=false;const viewCounts=JSON.parse(localStorage.getItem('photo-carousel-demo-counts')||'[1,0,0,0,0]');let photo=document.querySelector('#photo'),nextPhoto=document.querySelector('#nextPhoto');const frame=document.querySelector('#frame'),play=document.querySelector('#play'),duration=document.querySelector('#duration'),transition=document.querySelector('#transition'),fit=document.querySelector('#fit');
-  function applyFit(target=photo){target.classList.remove('fill','zoom','pan');target.style.removeProperty('height');target.style.removeProperty('--pan-end');if(fit.value==='ken_burns'&&target.naturalWidth>0){target.classList.add('zoom');if(frame.classList.contains('portrait')&&target.naturalWidth>target.naturalHeight){const height=frame.clientHeight*1.1;const width=height*target.naturalWidth/target.naturalHeight;const travel=Math.min(Math.max(0,width-frame.clientWidth),frame.clientWidth*.1);target.style.height=`${height}px`;target.style.setProperty('--pan-end',`${-travel}px`);target.style.setProperty('--sweep-duration',`${Math.max(15,Number(duration.value)*3)}s`);target.style.setProperty('--sweep-direction',index%2?'reverse':'normal');target.classList.add('pan')}}else{target.classList.toggle('fill',fit.value==='fill');target.style.objectFit=fit.value==='stretch'?'fill':fit.value==='fit'?'contain':'cover';target.classList.toggle('zoom',fit.value==='ken_burns')}}
-  photo.onload=()=>applyFit(photo);nextPhoto.onload=()=>applyFit(nextPhoto);
-  function updateOverlay(){const now=new Date(),clock=document.querySelector('#showClock').checked,date=document.querySelector('#showDate').checked,weather=document.querySelector('#showWeather').checked,glass=document.querySelector('#useGlass').checked;const content=`${clock?`<strong>${now.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</strong>`:''}${date?`<span>${now.toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'})}</span>`:''}${weather?`<span class="weather-line"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6.5 19a4.5 4.5 0 0 1-.4-9A6.5 6.5 0 0 1 18.7 8a4 4 0 0 1-.2 8H6.5zm1.2-2h10.7a2 2 0 0 0 0-4h-1.2l-.3-1.2A4.5 4.5 0 0 0 8.2 12l-.2 1H6.5a2.5 2.5 0 1 0 0 5z"/></svg>${document.querySelector('#weatherPostal').value||'10115'} · 12° · partly cloudy</span>`:''}`;let layer=document.querySelector('#sleepOverlay');if(!layer){layer=document.createElement('div');layer.id='sleepOverlay';layer.className='sleep-overlay';frame.append(layer)}const hud=document.querySelector('#photoHud');if(sleeping){layer.hidden=!(clock||date||weather);layer.innerHTML=glass?`<div class="glass-panel">${content}</div>`:content;if(hud)hud.hidden=true;frame.classList.add('sleeping')}else{layer.hidden=true;frame.classList.remove('sleeping');let liveHud=hud;if(!liveHud){liveHud=document.createElement('div');liveHud.id='photoHud';liveHud.className='photo-hud';frame.append(liveHud)}liveHud.hidden=!(clock||date||weather);liveHud.innerHTML=content;liveHud.classList.toggle('glass-panel',glass)}document.querySelector('#sleepNow').hidden=sleeping;document.querySelector('#wakeNow').hidden=!sleeping;document.querySelector('#showClock').onchange=updateOverlay;document.querySelector('#showDate').onchange=updateOverlay;document.querySelector('#showWeather').onchange=updateOverlay;document.querySelector('#useGlass').onchange=updateOverlay;document.querySelector('#showCalendar').onchange=renderCalendarDemo;renderCalendarDemo();renderNoteDemo();document.querySelector('#showNotes').onchange=renderNoteDemo;document.querySelector('#demoNote').oninput=renderNoteDemo;renderNoteDemo()}
-  function renderNoteDemo(){const card=document.querySelector('#noteOverlay');if(!card)return;const text=document.querySelector('#demoNote').value.trim(),enabled=document.querySelector('#showNotes').checked&&text.length>0;card.hidden=!enabled;if(enabled){card.textContent=text;card.classList.toggle('glass-panel',document.querySelector('#useGlass').checked)}}
-  function renderCalendarDemo(){const card=document.querySelector('#calendarOverlay');if(!card)return;const enabled=document.querySelector('#showCalendar').checked;card.hidden=!enabled;if(!enabled)return;const now=new Date(),fmt=d=>d.toLocaleDateString('en-GB',{day:'numeric',month:'short'}),add=n=>new Date(now.getFullYear(),now.getMonth(),now.getDate()+n);const cake='<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 3c1.4 1.5 1.5 2.5 0 3.5C10.5 5.5 10.6 4.5 12 3ZM5 12a2 2 0 0 1 4 0 2 2 0 0 0 4 0 2 2 0 0 1 4 0h2v8H5v-8Zm2 2v4h10v-4a4 4 0 0 1-6-1 4 4 0 0 1-4 1Zm-2-5h14v2H5V9Z"/></svg>';const bin='<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 3h8l1 2h4v2H3V5h4l1-2Zm-2 6h12l-1 12H7L6 9Zm3 2v8h2v-8H9Zm4 0v8h2v-8h-2Z"/></svg>';const groups=[['Today',[{icon:cake,text:'Birthday · Emma',date:add(0),time:'18:00'}]],['This week',[{icon:bin,text:'Recycling collection',date:add(2),time:'07:00'}]],['Soon',[{icon:cake,text:'Anniversary reminder',date:add(9),time:'All day'}]]];card.classList.toggle('glass-panel',document.querySelector('#useGlass').checked);card.innerHTML='<div class="calendar-title">Calendar · sample events</div>'+groups.map(([name,events])=>'<div class="calendar-group"><b>'+name+'</b>'+events.map(e=>'<div class="calendar-event">'+e.icon+'<span>'+e.text+' · '+fmt(e.date)+(e.time==='All day'?'':' · '+e.time)+'</span></div>').join('')+'</div>').join('')}
-  function sleep(manual=true){sleeping=true;if(manual)manualSleep=true;document.querySelector('#contextMenu').hidden=true;clearInterval(timer);clearTimeout(sleepTimeout);play.dataset.playing='false';play.textContent='▶ Play';updateOverlay()}function wake(manual=true){sleeping=false;if(manual)manualSleep=false;updateOverlay()}function checkSchedule(){if(!document.querySelector('#scheduleEnabled').checked||manualSleep)return;const now=new Date(),parts=t=>t.split(':').map(Number),startText=document.querySelector('#scheduleStart').value,endText=document.querySelector('#scheduleEnd').value;if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(startText)||!/^([01]\d|2[0-3]):[0-5]\d$/.test(endText))return;const [sh,sm]=parts(startText),[eh,em]=parts(endText),minute=now.getHours()*60+now.getMinutes(),start=sh*60+sm,end=eh*60+em,weekday=now.getDay()>0&&now.getDay()<6;const active=(!document.querySelector('#scheduleDays').value.includes('weekdays')||weekday)&&(start<end?minute>=start&&minute<end:(minute>=start||minute<end));if(active){if(sleeping)wake(false);if(play.dataset.playing!=='true'){play.dataset.playing='true';play.textContent='❚❚ Pause';restart()}}else if(!sleeping)sleep(false)}
+    <section class="hero"><div class="kicker">Portrait photo display · Android TV · Fire TV</div><h1>Your photos on the big screen.</h1><p>Stillframe turns a Fire TV into a portrait photo display. Preview the app screen below, try the remote controls, and explore the clock, calendar, notes, sleep screen, and QR phone controls.</p><a class="button" href="https://github.com/weisser-dev/fire-tv-diashow/releases/latest/download/app-release.apk">↓ Download the latest APK</a></section>
 
-  function show(next){index=(next+items.length)%items.length;viewCounts[index]=(viewCounts[index]||0)+1;localStorage.setItem('photo-carousel-demo-counts',JSON.stringify(viewCounts));const outgoing=photo,incoming=nextPhoto;let completed=false;incoming.style.transition='none';incoming.style.opacity='0';incoming.src='demo/'+items[index][0];incoming.alt=items[index][2];const complete=()=>{if(completed)return;completed=true;applyFit(incoming);void incoming.offsetWidth;const ms=transition.value==='cut'?0:transition.value==='crossfade'?1800:transition.value==='slide'?1200:transition.value==='zoom'?1100:1400;incoming.style.transition=`opacity ${ms}ms ease`;outgoing.style.transition=`opacity ${ms}ms ease`;frame.classList.toggle('slideshow-slide',transition.value==='slide');frame.classList.toggle('slideshow-zoom',transition.value==='zoom');requestAnimationFrame(()=>{incoming.style.opacity='1';outgoing.style.opacity='0'});setTimeout(()=>{outgoing.onload=null;outgoing.onerror=null;outgoing.src='';outgoing.style.transition='none';outgoing.style.opacity='0';incoming.style.transition='none';incoming.style.opacity='1';photo=incoming;nextPhoto=outgoing;photo.style.zIndex='0';nextPhoto.style.zIndex='1';document.querySelector('#count').textContent=`${index+1} / ${items.length}`;document.querySelector('#caption').textContent=items[index][1];document.querySelectorAll('.thumb').forEach((b,i)=>b.classList.toggle('active',i===index));},ms)};incoming.onload=complete;incoming.onerror=()=>{incoming.style.opacity='0'};if(incoming.complete&&incoming.naturalWidth)complete()}
-  function chooseShuffleIndex(){const pool=viewCounts.map((count,i)=>({count,i})).filter(x=>x.i!==index),least=Math.min(...pool.map(x=>x.count)),eligible=pool.filter(x=>x.count<=least+3),weighted=eligible.flatMap(x=>Array(Math.max(1,4-(x.count-least))).fill(x.i));return weighted[Math.floor(Math.random()*weighted.length)]}function restart(){clearInterval(timer);if(play.dataset.playing==='true')timer=setInterval(()=>show(shuffle?chooseShuffleIndex():index+1),Math.max(5,Number(duration.value))*1000)}
-  items.forEach((item,i)=>{const b=document.createElement('button');b.className='thumb'+(!i?' active':'');b.setAttribute('aria-label','Show '+item[1]);b.innerHTML=`<img src="demo/${item[0]}" alt="">`;b.onclick=()=>show(i);document.querySelector('#thumbs').append(b)});
-  document.querySelector('#prev').onclick=()=>show(index-1);document.querySelector('#next').onclick=()=>show(index+1);document.querySelector('#shuffleToggle').onclick=()=>{shuffle=!shuffle;document.querySelector('#shuffleToggle').textContent='Shuffle '+(shuffle?'on':'off')};play.onclick=()=>{const on=play.dataset.playing!=='true';play.dataset.playing=String(on);play.textContent=on?'❚❚ Pause':'▶ Play';restart()};duration.oninput=()=>{document.querySelector('#durationOut').value=duration.value;applyFit();restart()};document.querySelector('#motionDuration').oninput=e=>document.querySelector('#motionOut').value=e.target.value;fit.onchange=()=>show(index);transition.onchange=()=>show(index);document.querySelector('#orientation').onchange=e=>{frame.classList.toggle('portrait',e.target.value==='portrait');applyFit()};window.addEventListener('resize',applyFit);document.querySelector('#sleepTimer').onchange=()=>{clearTimeout(sleepTimeout);const mins=Number(document.querySelector('#sleepTimer').value);if(mins&&play.dataset.playing==='true')sleepTimeout=setTimeout(sleep,mins*60000)};document.querySelector('#scheduleEnabled').onchange=checkSchedule;document.querySelector('#scheduleDays').onchange=checkSchedule;document.querySelector('#scheduleStart').onchange=checkSchedule;document.querySelector('#scheduleEnd').onchange=checkSchedule;scheduleTimer=setInterval(checkSchedule,30000);setInterval(updateOverlay,15000);document.querySelector('#sleepNow').onclick=sleep;document.querySelector('#wakeNow').onclick=wake;document.querySelector('#contextToggle').onclick=()=>{const menu=document.querySelector('#contextMenu');menu.hidden=!menu.hidden;if(!menu.hidden){clearInterval(timer);play.dataset.playing='false';play.textContent='▶ Play'}};document.querySelectorAll('#contextMenu button').forEach(button=>button.onclick=()=>{const action=button.dataset.action;if(action==='sleep')sleep();else if(action==='resume'){document.querySelector('#contextMenu').hidden=true;restart()}else if(action==='shuffle'){shuffle=!shuffle;document.querySelector('#shuffleToggle').textContent='Shuffle '+(shuffle?'on':'off')}else if(action==='transition'){transition.selectedIndex=(transition.selectedIndex+1)%transition.options.length;transition.onchange()}else if(action==='fit'){fit.selectedIndex=(fit.selectedIndex+1)%fit.options.length;fit.onchange()}else if(action==='speed'){duration.value=Number(duration.value)>=20?3:Number(duration.value)+1;duration.oninput()}else if(action==='upload'){alert('Demo only: the Fire TV opens its QR upload page. No files are transferred here.')}});document.querySelector('#weatherPostal').oninput=updateOverlay;document.querySelector('#weatherCountry').oninput=updateOverlay;show(0);updateOverlay();
-</script></body></html>
+    <section class="panel demo" aria-label="Interactive Fire TV app demo">
+      <div class="demohead"><div><div class="kicker">INTERACTIVE WEB DEMO · OPTIMIZED FOR FIRE TV</div><h2>Stillframe running in a TV mockup</h2><p>Explore the app’s portrait playback screen, remote controls, calendar, tasks, notes, clock, weather, sleep display, and image settings. The demo uses the app’s one-photo-at-a-time fade transition and preloads the next sample image.</p></div><span class="tag">5 landscape samples · no uploads</span></div>
+      <div class="stage">
+        <div class="tv-column">
+          <div class="tv-shell">
+            <div class="frame portrait" id="frame">
+              <div class="screen-content" id="screenContent">
+                <img class="photo" id="photo" src="demo/coastal-cliffs.jpg" alt="Coast and cliffs at sunset">
+                <div class="transition-cover" id="transitionCover"></div>
+                <div class="top-hud"><div class="clock-chip" id="clock"></div><div class="date-chip"><div class="date-info"><span id="date"></span><span class="weather-line" id="weatherLine"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6.5 19a4.5 4.5 0 0 1-.4-9A6.5 6.5 0 0 1 18.7 8a4 4 0 0 1-.2 8H6.5Z"/></svg><span id="weatherText"></span></span></div><button class="qr-badge" id="qrBadge" aria-label="Open phone demo" title="Open the phone-management demo"><svg viewBox="0 0 29 29" aria-hidden="true"><path d="M1 1h9v9H1zm2 2v5h5V3zm3 1h1v3H6zM19 1h9v9h-9zm2 2v5h5V3zm3 1h1v3h-1zM1 19h9v9H1zm2 2v5h5v-5zm3 1h1v3H6zM13 1h2v2h-2zm-2 4h3v2h-3zm3 3h3v2h-3zm-3 3h2v2h-2zm4 0h3v2h-3zm4 0h2v2h-2zm3 0h2v2h-2zm-11 3h3v2h-3zm4 1h2v3h-2zm3-2h2v2h-2zm3 3h2v2h-2zm4-4h2v3h-2zm-17 1h2v2h-2zm3 3h2v2h-2zm-3 3h3v2h-3zm4 2h2v2h-2zm3 2h2v3h-2zm3-2h3v2h-3zm4 3h2v2h-2zm3-4h2v3h-2z"/></svg></button></div></div>
+                <div class="agenda-overlay" id="agendaOverlay"><div class="agenda-col"><div class="agenda-heading">UPCOMING</div><div id="calendarRows"></div></div><div class="agenda-col"><div class="agenda-heading">TASKS</div><div id="todoRows"></div><div class="agenda-heading" style="margin-top:1.5cqw">NOTES</div><div id="noteRows"></div></div></div>
+                <div class="playback-controls" id="playbackControls"><button id="screenPrev" aria-label="Previous photo">|◀</button><button id="screenPause" class="pause-symbol" aria-label="Resume slideshow">▶</button><button id="screenNext" aria-label="Next photo">▶|</button><span class="screen-count" id="screenCount">1 / 5</span></div>
+                <div class="pause-menu" id="pauseMenu" hidden><div class="pause-card"><h3>Slideshow paused</h3><button class="pause-option active" data-action="resume">Resume <span>›</span></button><button class="pause-option" data-action="sleep">Sleep now <span>☾</span></button><button class="pause-option" data-action="shuffle">Shuffle · Off <span>↔</span></button><button class="pause-option" data-action="phone">Add photos / phone controls <span>▦</span></button><button class="pause-option" data-action="transition">Transition · Fade <span>›</span></button><button class="pause-option" data-action="fit">Image fit · Ken Burns <span>›</span></button></div></div>
+                <div class="sleep-overlay" id="sleepOverlay" hidden><button class="sleep-qr" id="sleepQr" aria-label="Open phone demo" title="Open the phone-management demo"><svg viewBox="0 0 29 29" aria-hidden="true"><path d="M1 1h9v9H1zm2 2v5h5V3zm3 1h1v3H6zM19 1h9v9h-9zm2 2v5h5V3zm3 1h1v3h-1zM1 19h9v9H1zm2 2v5h5v-5zm3 1h1v3H6zM13 1h2v2h-2zm-2 4h3v2h-3zm3 3h3v2h-3zm-3 3h2v2h-2zm4 0h3v2h-3zm4 0h2v2h-2zm3 0h2v2h-2zm-11 3h3v2h-3zm4 1h2v3h-2zm3-2h2v2h-2zm3 3h2v2h-2zm4-4h2v3h-2zm-17 1h2v2h-2zm3 3h2v2h-2zm-3 3h3v2h-3zm4 2h2v2h-2zm3 2h2v3h-2zm3-2h3v2h-3zm4 3h2v2h-2zm3-4h2v3h-2z"/></svg></button><div class="sleep-clock" id="sleepClock"></div><div class="sleep-date" id="sleepDate"></div><div class="sleep-weather" id="sleepWeather"></div><div class="sleep-agenda"><div><div class="agenda-heading">UPCOMING</div><div id="sleepCalendarRows"></div></div><div><div class="agenda-heading">TASKS & NOTES</div><div id="sleepTodoRows"></div><div id="sleepNoteRows"></div></div></div></div>
+              </div>
+            </div>
+          </div>
+          <div class="controls"><button class="iconbtn" id="prev" aria-label="Previous photo">‹</button><button class="iconbtn play" id="play">▶ Play</button><button class="iconbtn" id="next" aria-label="Next photo">›</button><span id="count" class="caption">1 / 5</span></div>
+          <div class="thumbs" id="thumbs" aria-label="Choose a demo photo"></div><div class="caption" id="caption">Coast at sunset</div>
+          <button class="iconbtn" id="phoneDemoToggle">▦ Open phone-management demo</button>
+          <div class="phone-panel" id="phonePanel" hidden><h3>Phone management · demo</h3><p>Tap an eye to hide or show every upcoming event with that title. This demo stores the choice in this browser only.</p><div id="phoneSeries"></div><p class="caption">Photo upload is disabled on GitHub Pages. On the TV, this page is available from the QR code while Stillframe is running.</p></div>
+        </div>
+
+        <div class="settings">
+          <div class="setting"><label for="orientation">App orientation</label><select id="orientation"><option value="portrait90" selected>Portrait · 90°</option><option value="portrait270">Portrait · 270°</option><option value="landscape0">Landscape · 0°</option><option value="landscape180">Landscape · 180°</option></select><small>The app rotates its interface for the portrait display; Fire TV keeps its HDMI signal in landscape.</small></div>
+          <div class="setting"><label for="transition">Transition</label><select id="transition"><option value="fade">Fade through black</option><option value="crossfade">Short fade through black</option><option value="cut">Cut</option></select><small>Matches the app: fade the current photo to black, swap the preloaded image, then fade back in.</small></div>
+          <div class="setting"><label for="motionDuration">Pan duration <span><output id="motionOut">30</output> sec</span></label><input id="motionDuration" type="range" min="15" max="60" step="15" value="30"><small>Slow pan for landscape photos on a portrait screen.</small></div>
+          <div class="setting"><label for="duration">Photo duration <span><output id="durationOut">8</output> sec</span></label><input id="duration" type="range" min="5" max="60" value="8"><small>On moving photos, the app waits for the pan to finish: <strong id="currentDuration">30 sec</strong>.</small></div>
+          <div class="setting"><label for="fit">Image fit</label><select id="fit"><option value="fit">Fit</option><option value="fill">Fill</option><option value="stretch">Stretch</option><option value="ken_burns" selected>Ken Burns · zoom &amp; pan</option></select><small>Motion plays on a single image. The next photo is preloaded before the screen changes.</small></div>
+          <div class="demo-extras">
+            <div class="demo-actions"><button class="iconbtn" id="shuffleToggle">Shuffle off</button><button class="iconbtn" id="sleepNow">☾ Sleep now</button><button class="iconbtn" id="wakeNow" hidden>☀ Wake up</button><label><input id="showClock" type="checkbox" checked> Clock</label><label><input id="showDate" type="checkbox" checked> Date</label><label><input id="showWeather" type="checkbox" checked> Weather</label><label><input id="useGlass" type="checkbox" checked> Light glass</label><label><input id="showCalendar" type="checkbox" checked> Calendar</label><label><input id="showTasks" type="checkbox" checked> Tasks</label><label><input id="showNotes" type="checkbox" checked> Notes</label><label><input id="showQr" type="checkbox" checked> QR</label></div>
+            <div class="weather-place"><label>Country <input id="weatherCountry" value="DE" maxlength="2" aria-label="Country code"></label><label>Postal code <input id="weatherPostal" value="64686" aria-label="Postal code"></label><span>Sample weather label; no location is sent.</span></div>
+            <div class="weather-place"><label>Sleep timer <select id="sleepTimer"><option value="0">Off</option><option value="1">1 min · demo</option><option value="15">15 min</option><option value="30">30 min</option><option value="60">60 min</option></select></label><label><input id="scheduleEnabled" type="checkbox"> Weekly schedule</label><label>Days <select id="scheduleDays"><option value="weekdays">Mon–Fri</option><option value="daily">Every day</option></select></label><label>From <input id="scheduleStart" type="time" value="16:00"></label><label>To <input id="scheduleEnd" type="time" value="21:00"></label></div>
+            <div class="context-menu"><b>Remote context menu · click to try</b><button data-action="resume">Resume slideshow</button><button data-action="sleep">Sleep now</button><button data-action="shuffle">Toggle shuffle</button><button data-action="phone">Open phone controls</button><button data-action="transition">Change transition</button><button data-action="fit">Change image fit</button><button data-action="speed">Change photo duration</button></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="features"><div class="feature"><b>Portrait Fire TV display</b><span>Menus, remote navigation, and photos follow the chosen app orientation while the HDMI output stays in landscape.</span></div><div class="feature"><b>Local photos and albums</b><span>Browse, sort, preview, and remove photos on the TV. Add pictures from a phone over the same Wi-Fi.</span></div><div class="feature"><b>Calendar, tasks, and notes</b><span>Show the next events and local reminders on the display. Use the phone QR page to hide or restore recurring calendar titles.</span></div><div class="feature"><b>One-photo transition</b><span>Stillframe preloads the next photo, fades to black, swaps the image, then fades back in. Photo movement starts after the transition.</span></div><div class="feature"><b>Smart shuffle</b><span>Random playback favors new and less-seen photos. View counts are saved locally on the TV.</span></div><div class="feature"><b>Sleep and schedule</b><span>Show a dim clock, calendar, and reminders during sleep hours. Set a sleep timer or a weekly playback schedule.</span></div></section>
+
+    <section class="panel actual-shot"><div><div class="kicker">REAL DEVICE CAPTURES</div><h2>Running on a portrait Fire TV</h2><p>These app screenshots were captured directly from the Fire TV over ADB. They use landscape sample images without people.</p></div><div class="shot-gallery"><img src="screenshots/firetv-portrait-controls.png" alt="Stillframe slideshow controls on a portrait Fire TV"><img src="screenshots/firetv-portrait-sleep.png" alt="Stillframe sleep screen on a portrait Fire TV"></div></section>
+    <section class="panel"><div class="kicker">INSTALL ON FIRE TV</div><h2>Download and install the APK</h2><p>Open this address in Downloader, get the APK, and allow Downloader to install unknown apps when prompted:</p><code>https://github.com/weisser-dev/fire-tv-diashow/releases/latest/download/app-release.apk</code><p class="caption">Photos and phone uploads stay on your TV. The GitHub Pages demo does not upload files or connect to your calendar.</p></section>
+  </main>
+  <footer>Stillframe · <a href="https://github.com/weisser-dev/fire-tv-diashow">Source code, releases, and help</a> · Optimized for Fire TV</footer>
+</div>
+
+<script>
+  // A browser-only model of the Fire TV app. Sample photos and calendar data stay on this page.
+  const items = [
+    ['coastal-cliffs.jpg', 'Coast at sunset', 'Coast and cliffs at sunset'],
+    ['redwood-forest.jpg', 'Redwood forest', 'Sunlight through towering redwood trees'],
+    ['japanese-garden.jpg', 'Japanese garden', 'Japanese garden with a pond and red bridge'],
+    ['desert-dunes.jpg', 'Desert dunes', 'Golden dunes in warm evening light'],
+    ['alpine-lake.jpg', 'Alpine lake', 'Clear alpine lake beneath snow-capped mountains']
+  ];
+  const calendarEvents = [
+    { title: 'Wiegetag', days: 0, time: '07:00', type: 'calendar' },
+    { title: 'Schwarze Tonne', days: 1, time: '19:00', type: 'bin' },
+    { title: 'Gelbe Tonne', days: 3, time: '19:00', type: 'bin' },
+    { title: 'Garten gießen', days: 5, time: '09:00', type: 'calendar' },
+    { title: 'Wiegetag', days: 7, time: '07:00', type: 'calendar' },
+    { title: 'Jahrestag', days: 9, time: 'Ganztägig', type: 'cake' }
+  ];
+  const todos = [{ text: 'Pflanzen gießen', done: false }, { text: 'Bilder sortieren', done: false }];
+  const notes = ['Erinnerungen', 'Nächsten Urlaub planen'];
+  let index = 0, timer = null, sleeping = false, paused = false, shuffle = false;
+  let sleepTimeout = null, controlsHideTimer = null, transitionBusy = false, queuedImage = null, queuedIndex = -1, motionRequired = false;
+  const countsKey = 'stillframe-demo-counts';
+  const hiddenKey = 'stillframe-demo-hidden-series';
+  const storedCounts = JSON.parse(localStorage.getItem(countsKey) || '[1,0,0,0,0]');
+  const viewCounts = items.map((_, i) => Number(storedCounts[i] || 0));
+  let hiddenSeries = new Set(JSON.parse(localStorage.getItem(hiddenKey) || '[]'));
+  const frame = document.querySelector('#frame');
+  const photo = document.querySelector('#photo');
+  const cover = document.querySelector('#transitionCover');
+  const play = document.querySelector('#play');
+  const screenPause = document.querySelector('#screenPause');
+  const duration = document.querySelector('#duration');
+  const transition = document.querySelector('#transition');
+  const fit = document.querySelector('#fit');
+  const icon = {
+    calendar: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7 2h2v3H7zm8 0h2v3h-2zM4 4h3v2h2V4h6v2h2V4h3v18H4zm2 6v10h12V10z"/></svg>',
+    bin: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 3h8l1 2h4v2H3V5h4zm-2 6h12l-1 12H7z"/></svg>',
+    cake: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2c1.5 1.4 1.6 2.5 0 3.5C10.4 4.5 10.5 3.4 12 2ZM5 11a2 2 0 0 1 4 0 2 2 0 0 0 4 0 2 2 0 0 1 4 0h2v9H5zm2 3v4h10v-4a4 4 0 0 1-6-1 4 4 0 0 1-4 1Z"/></svg>'
+  };
+  function nextDate(days) {
+    const date = new Date();
+    date.setHours(12, 0, 0, 0);
+    date.setDate(date.getDate() + days);
+    return date;
+  }
+  function dateLabel(date) {
+    return date.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+  }
+  function category(days) {
+    return days === 0 ? 'TODAY' : days < 7 ? 'THIS WEEK' : 'SOON';
+  }
+  function visibleEvents() {
+    return calendarEvents.filter(event => !hiddenSeries.has(event.title));
+  }
+  function makeEventRows(events, limit = 5) {
+    return events.slice(0, limit).map(event => '<div class="agenda-row">' + icon[event.type] + '<span>' + dateLabel(nextDate(event.days)) + ' · ' + event.time + ' · ' + event.title + '</span></div>').join('');
+  }
+  function renderAgenda() {
+    const events = visibleEvents();
+    const calendarOn = document.querySelector('#showCalendar').checked;
+    const tasksOn = document.querySelector('#showTasks').checked;
+    const notesOn = document.querySelector('#showNotes').checked;
+    document.querySelector('#agendaOverlay').hidden = !(calendarOn || tasksOn || notesOn);
+    document.querySelector('#calendarRows').innerHTML = calendarOn
+      ? events.slice(0, 5).map(event => '<div class="agenda-row">' + icon[event.type] + '<span><b>' + category(event.days) + '</b> · ' + dateLabel(nextDate(event.days)) + ' · ' + event.title + '</span></div>').join('')
+      : '<span>Calendar hidden</span>';
+    document.querySelector('#todoRows').innerHTML = tasksOn
+      ? todos.map(item => '<div class="agenda-row"><span>' + (item.done ? '☑' : '☐') + '</span><span>' + item.text + '</span></div>').join('')
+      : '<span>Tasks hidden</span>';
+    document.querySelector('#noteRows').innerHTML = notesOn
+      ? notes.map(note => '<div class="agenda-note">' + note + '</div>').join('')
+      : '<span>Notes hidden</span>';
+    document.querySelector('#sleepCalendarRows').innerHTML = calendarOn ? makeEventRows(events, 5) : '<span>Calendar hidden</span>';
+    document.querySelector('#sleepTodoRows').innerHTML = tasksOn
+      ? todos.map(item => '<div class="agenda-row"><span>' + (item.done ? '☑' : '☐') + '</span><span>' + item.text + '</span></div>').join('')
+      : '<span>Tasks hidden</span>';
+    document.querySelector('#sleepNoteRows').innerHTML = notesOn
+      ? notes.map(note => '<div class="agenda-note">' + note + '</div>').join('')
+      : '<span>Notes hidden</span>';
+    renderPhoneSeries();
+  }
+  function renderPhoneSeries() {
+    const list = document.querySelector('#phoneSeries');
+    if (!list) return;
+    list.replaceChildren();
+    const series = new Map();
+    for (const event of calendarEvents) {
+      if (!series.has(event.title)) series.set(event.title, []);
+      series.get(event.title).push(event);
+    }
+    for (const [title, occurrences] of series) {
+      const row = document.createElement('div');
+      row.className = 'phone-series';
+      const label = document.createElement('span');
+      label.textContent = title + ' · ' + dateLabel(nextDate(occurrences[0].days)) + (occurrences.length > 1 ? ' · ' + occurrences.length + ' events' : '');
+      const eye = document.createElement('button');
+      eye.className = 'eye-button' + (hiddenSeries.has(title) ? ' off' : '');
+      eye.type = 'button';
+      eye.textContent = hiddenSeries.has(title) ? '◉̸' : '◉';
+      eye.setAttribute('aria-label', hiddenSeries.has(title) ? 'Show this event series' : 'Hide this event series');
+      eye.onclick = () => {
+        if (hiddenSeries.has(title)) hiddenSeries.delete(title); else hiddenSeries.add(title);
+        localStorage.setItem(hiddenKey, JSON.stringify([...hiddenSeries]));
+        renderAgenda();
+      };
+      row.append(label, eye);
+      list.append(row);
+    }
+  }
+  function queuePhoto(target) {
+    target = (target + items.length) % items.length;
+    if (queuedIndex === target && queuedImage) return queuedImage;
+    const image = new Image();
+    image.decoding = 'async';
+    image.src = 'demo/' + items[target][0];
+    queuedImage = image;
+    queuedIndex = target;
+    return image;
+  }
+  function waitForImage(image) {
+    if (image.complete) return image.naturalWidth ? Promise.resolve() : Promise.reject(new Error('Sample photo could not be loaded.'));
+    return new Promise((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error('Sample photo could not be loaded.'));
+    });
+  }
+  function applyFit() {
+    photo.classList.remove('fill', 'zoom', 'pan');
+    photo.style.removeProperty('height');
+    photo.style.removeProperty('width');
+    photo.style.removeProperty('--pan-end');
+    const mode = fit.value;
+    photo.style.objectFit = mode === 'stretch' ? 'fill' : mode === 'fill' ? 'cover' : 'contain';
+    motionRequired = false;
+    if (mode === 'ken_burns' && photo.naturalWidth && photo.naturalHeight) {
+      const viewport = frame.clientWidth / frame.clientHeight;
+      const imageAspect = photo.naturalWidth / photo.naturalHeight;
+      const motionSeconds = Math.max(Number(duration.value), Number(document.querySelector('#motionDuration').value));
+      photo.style.setProperty('--sweep-duration', motionSeconds + 's');
+      photo.style.setProperty('--sweep-direction', index % 2 ? 'reverse' : 'normal');
+      if (imageAspect > viewport * 1.015) {
+        const height = frame.clientHeight * 1.1;
+        const width = height * imageAspect;
+        const travel = Math.max(0, width * 1.045 - frame.clientWidth);
+        photo.classList.add('pan');
+        photo.style.height = height + 'px';
+        photo.style.width = 'auto';
+        photo.style.setProperty('--pan-end', (-travel) + 'px');
+        motionRequired = true;
+      } else if (imageAspect < viewport / 1.015) {
+        photo.classList.add('zoom');
+        photo.style.objectFit = 'cover';
+        motionRequired = true;
+      } else {
+        photo.classList.add('zoom');
+      }
+    }
+    photo.style.animationPlayState = play.dataset.playing === 'true' ? 'running' : 'paused';
+    updateMotionHint();
+  }
+  function updateMotionHint() {
+    const sweep = document.querySelector('#motionDuration').value;
+    document.querySelector('#motionOut').value = sweep;
+    const seconds = Math.max(Number(duration.value), motionRequired ? Number(sweep) : 0);
+    document.querySelector('#durationOut').value = duration.value;
+    document.querySelector('#currentDuration').textContent = seconds + ' sec';
+  }
+  function updatePhotoLabels() {
+    document.querySelector('#count').textContent = (index + 1) + ' / ' + items.length;
+    document.querySelector('#screenCount').textContent = (index + 1) + ' / ' + items.length;
+    document.querySelector('#caption').textContent = items[index][1];
+    document.querySelectorAll('.thumb').forEach((button, i) => button.classList.toggle('active', i === index));
+    renderAgenda();
+  }
+  function preloadNext() {
+    const target = shuffle ? chooseShuffleIndex() : (index + 1) % items.length;
+    queuePhoto(target);
+  }
+  function chooseShuffleIndex() {
+    const pool = viewCounts.map((count, i) => ({ count, i })).filter(item => item.i !== index);
+    const least = Math.min(...pool.map(item => item.count));
+    const eligible = pool.filter(item => item.count <= least + 3);
+    const weighted = eligible.flatMap(item => Array(Math.max(1, 4 - (item.count - least))).fill(item.i));
+    return weighted[Math.floor(Math.random() * weighted.length)];
+  }
+  function transitionFadeMs() {
+    if (transition.value === 'cut') return 0;
+    const total = transition.value === 'crossfade' ? 750 : 850;
+    return Math.max(200, Math.min(300, Math.round(total / 3)));
+  }
+  function wait(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+  async function show(next) {
+    if (transitionBusy) return;
+    const target = (next + items.length) % items.length;
+    if (target === index) return;
+    const wasPlaying = play.dataset.playing === 'true';
+    transitionBusy = true;
+    clearInterval(timer);
+    photo.style.animationPlayState = 'paused';
+    try {
+      const incoming = queuePhoto(target);
+      await waitForImage(incoming);
+      const fade = transitionFadeMs();
+      if (fade) {
+        cover.style.transition = 'opacity ' + fade + 'ms linear';
+        cover.style.opacity = '1';
+        await wait(fade + 20);
+        await wait(90);
+      }
+      index = target;
+      viewCounts[index] = (viewCounts[index] || 0) + 1;
+      localStorage.setItem(countsKey, JSON.stringify(viewCounts));
+      photo.onload = null;
+      photo.src = incoming.src;
+      photo.alt = items[index][2];
+      if (photo.decode) await photo.decode().catch(() => {});
+      applyFit();
+      photo.style.animationPlayState = 'paused';
+      updatePhotoLabels();
+      preloadNext();
+      if (fade) {
+        requestAnimationFrame(() => { cover.style.opacity = '0'; });
+        await wait(fade + 25);
+      }
+      photo.style.animationPlayState = wasPlaying ? 'running' : 'paused';
+      if (wasPlaying) pulseControls();
+    } catch (error) {
+      document.querySelector('#caption').textContent = error.message;
+      cover.style.opacity = '0';
+    } finally {
+      transitionBusy = false;
+      if (wasPlaying) restart();
+    }
+  }
+  function pulseControls() {
+    frame.classList.remove('controls-hidden');
+    clearTimeout(controlsHideTimer);
+    if (play.dataset.playing === 'true') controlsHideTimer = setTimeout(() => frame.classList.add('controls-hidden'), 2800);
+  }
+  function setPlaying(value) {
+    if (transitionBusy) return;
+    if (value) {
+      sleeping = false;
+      frame.classList.remove('sleeping');
+      document.querySelector('#sleepOverlay').hidden = true;
+      document.querySelector('#sleepNow').hidden = false;
+      document.querySelector('#wakeNow').hidden = true;
+      const starting = play.dataset.playing !== 'true' && !paused;
+      paused = false;
+      play.dataset.playing = 'true';
+      play.textContent = 'Ⅱ Pause';
+      screenPause.textContent = 'Ⅱ';
+      screenPause.setAttribute('aria-label', 'Pause slideshow');
+      document.querySelector('#pauseMenu').hidden = true;
+      pulseControls();
+      photo.style.animationPlayState = 'running';
+      if (starting && shuffle) show(chooseShuffleIndex()); else restart();
+    } else {
+      paused = true;
+      play.dataset.playing = 'false';
+      play.textContent = '▶ Play';
+      screenPause.textContent = '▶';
+      screenPause.setAttribute('aria-label', 'Resume slideshow');
+      frame.classList.remove('controls-hidden');
+      photo.style.animationPlayState = 'paused';
+      clearInterval(timer);
+      document.querySelector('#pauseMenu').hidden = false;
+      selectPauseOption(0);
+    }
+  }
+  function slideDurationMs() {
+    const seconds = Number(duration.value);
+    return Math.max(seconds, fit.value === 'ken_burns' && motionRequired ? Number(document.querySelector('#motionDuration').value) : 0) * 1000;
+  }
+  function restart() {
+    clearInterval(timer);
+    if (play.dataset.playing === 'true') timer = setTimeout(() => show(shuffle ? queuedIndex : (index + 1) % items.length), slideDurationMs());
+  }
+  function sleep() {
+    sleeping = true;
+    paused = false;
+    clearInterval(timer);
+    clearTimeout(sleepTimeout);
+    frame.classList.add('sleeping');
+    document.querySelector('#sleepOverlay').hidden = false;
+    document.querySelector('#pauseMenu').hidden = true;
+    document.querySelector('#sleepNow').hidden = true;
+    document.querySelector('#wakeNow').hidden = false;
+    play.dataset.playing = 'false';
+    play.textContent = '▶ Play';
+    screenPause.textContent = '▶';
+    photo.style.animationPlayState = 'paused';
+    updateClock();
+  }
+  function wake() {
+    sleeping = false;
+    frame.classList.remove('sleeping');
+    document.querySelector('#sleepOverlay').hidden = true;
+    document.querySelector('#sleepNow').hidden = false;
+    document.querySelector('#wakeNow').hidden = true;
+    updateClock();
+  }
+  function updateGlass() {
+    document.querySelectorAll('.clock-chip,.date-chip,.agenda-overlay').forEach(node => node.classList.toggle('glass-panel', document.querySelector('#useGlass').checked));
+  }
+  function updateClock() {
+    const now = new Date();
+    const clock = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    const date = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+    const postal = document.querySelector('#weatherPostal').value.trim();
+    const weather = postal ? postal + ' · 8° · Mostly cloudy' : 'Weather unavailable';
+    document.querySelector('#clock').textContent = clock;
+    document.querySelector('#date').textContent = date;
+    document.querySelector('#date').hidden = !document.querySelector('#showDate').checked;
+    document.querySelector('#weatherText').textContent = weather;
+    document.querySelector('#weatherLine').hidden = !document.querySelector('#showWeather').checked;
+    document.querySelector('#clock').hidden = !document.querySelector('#showClock').checked;
+    document.querySelector('.date-chip').hidden = !document.querySelector('#showDate').checked && !document.querySelector('#showWeather').checked && !document.querySelector('#showQr').checked;
+    document.querySelector('#sleepClock').textContent = clock;
+    document.querySelector('#sleepDate').textContent = date;
+    document.querySelector('#sleepDate').hidden = !document.querySelector('#showDate').checked;
+    document.querySelector('#sleepWeather').textContent = document.querySelector('#showWeather').checked ? weather : '';
+    document.querySelector('#sleepWeather').hidden = !document.querySelector('#showWeather').checked;
+    document.querySelector('#qrBadge').hidden = !document.querySelector('#showQr').checked;
+    document.querySelector('#sleepQr').hidden = !document.querySelector('#showQr').checked;
+  }
+  function renderOrientation() {
+    const value = document.querySelector('#orientation').value;
+    const portrait = value.startsWith('portrait');
+    frame.classList.toggle('portrait', portrait);
+    frame.classList.toggle('landscape', !portrait);
+    frame.classList.toggle('rotated', value === 'portrait270' || value === 'landscape180');
+    applyFit();
+    restart();
+  }
+  function openPhoneDemo() {
+    const panel = document.querySelector('#phonePanel');
+    panel.hidden = !panel.hidden;
+    renderPhoneSeries();
+  }
+  function selectOption(id) {
+    const select = document.querySelector('#' + id);
+    select.selectedIndex = (select.selectedIndex + 1) % select.options.length;
+    select.dispatchEvent(new Event('change'));
+    if (id === 'transition') document.querySelector('[data-action=transition]').innerHTML = 'Transition · ' + select.options[select.selectedIndex].text + ' <span>›</span>';
+    if (id === 'fit') document.querySelector('[data-action=fit]').innerHTML = 'Image fit · ' + select.options[select.selectedIndex].text + ' <span>›</span>';
+  }
+  function selectPauseOption(index) {
+    const options = [...document.querySelectorAll('.pause-option')];
+    options.forEach((button, i) => button.classList.toggle('active', i === index));
+    options[index]?.focus();
+  }
+  function toggleShuffle() {
+    shuffle = !shuffle;
+    document.querySelector('#shuffleToggle').textContent = 'Shuffle ' + (shuffle ? 'on' : 'off');
+    document.querySelectorAll('[data-action="shuffle"]').forEach(button => button.innerHTML = 'Shuffle · ' + (shuffle ? 'On' : 'Off') + ' <span>↔</span>');
+    preloadNext();
+  }
+  items.forEach((item, i) => {
+    const button = document.createElement('button');
+    button.className = 'thumb' + (!i ? ' active' : '');
+    button.setAttribute('aria-label', 'Show ' + item[1]);
+    button.innerHTML = '<img src="demo/' + item[0] + '" alt="">';
+    button.onclick = () => show(i);
+    document.querySelector('#thumbs').append(button);
+  });
+  photo.onload = () => {
+    photo.style.animationPlayState = 'paused';
+    applyFit();
+    updatePhotoLabels();
+    preloadNext();
+  };
+  document.querySelector('#prev').onclick = () => show(index - 1);
+  document.querySelector('#next').onclick = () => show(index + 1);
+  document.querySelector('#screenPrev').onclick = () => show(index - 1);
+  document.querySelector('#screenNext').onclick = () => show(index + 1);
+  document.querySelector('#screenPause').onclick = () => setPlaying(play.dataset.playing !== 'true');
+  document.querySelector('#play').onclick = () => setPlaying(play.dataset.playing !== 'true');
+  document.querySelector('#shuffleToggle').onclick = toggleShuffle;
+  document.querySelector('#orientation').onchange = renderOrientation;
+  fit.onchange = () => { applyFit(); restart(); };
+  duration.oninput = () => { updateMotionHint(); restart(); };
+  document.querySelector('#motionDuration').oninput = () => { applyFit(); restart(); };
+  transition.onchange = () => {};
+  document.querySelector('#showClock').onchange = updateClock;
+  document.querySelector('#showDate').onchange = updateClock;
+  document.querySelector('#showWeather').onchange = updateClock;
+  document.querySelector('#showQr').onchange = updateClock;
+  document.querySelector('#showCalendar').onchange = renderAgenda;
+  document.querySelector('#showTasks').onchange = renderAgenda;
+  document.querySelector('#showNotes').onchange = renderAgenda;
+  document.querySelector('#weatherPostal').oninput = updateClock;
+  document.querySelector('#weatherCountry').oninput = updateClock;
+  document.querySelector('#useGlass').onchange = updateGlass;
+  document.querySelector('#sleepNow').onclick = sleep;
+  document.querySelector('#wakeNow').onclick = wake;
+  document.querySelector('#qrBadge').onclick = openPhoneDemo;
+  document.querySelector('#sleepQr').onclick = openPhoneDemo;
+  document.querySelector('#phoneDemoToggle').onclick = openPhoneDemo;
+  document.querySelector('#sleepTimer').onchange = () => {
+    clearTimeout(sleepTimeout);
+    const minutes = Number(document.querySelector('#sleepTimer').value);
+    if (minutes && play.dataset.playing === 'true') sleepTimeout = setTimeout(sleep, minutes * 60000);
+  };
+  function checkSchedule() {
+    if (!document.querySelector('#scheduleEnabled').checked) return;
+    const now = new Date();
+    const parts = value => value.split(':').map(Number);
+    const [sh, sm] = parts(document.querySelector('#scheduleStart').value);
+    const [eh, em] = parts(document.querySelector('#scheduleEnd').value);
+    const minute = now.getHours() * 60 + now.getMinutes();
+    const start = sh * 60 + sm, end = eh * 60 + em;
+    const weekdays = now.getDay() > 0 && now.getDay() < 6;
+    const daysOk = document.querySelector('#scheduleDays').value === 'daily' || weekdays;
+    const active = daysOk && (start < end ? minute >= start && minute < end : minute >= start || minute < end);
+    if (active && sleeping) { wake(); setPlaying(true); }
+    else if (!active && !sleeping) sleep();
+  }
+  document.querySelector('#scheduleEnabled').onchange = checkSchedule;
+  document.querySelector('#scheduleDays').onchange = checkSchedule;
+  document.querySelector('#scheduleStart').onchange = checkSchedule;
+  document.querySelector('#scheduleEnd').onchange = checkSchedule;
+  setInterval(checkSchedule, 30000);
+  setInterval(updateClock, 15000);
+  window.addEventListener('resize', applyFit);
+  document.querySelectorAll('[data-action]').forEach(button => button.onclick = () => {
+    const action = button.dataset.action;
+    if (action === 'resume') setPlaying(true);
+    else if (action === 'sleep') sleep();
+    else if (action === 'shuffle') toggleShuffle();
+    else if (action === 'phone') { openPhoneDemo(); document.querySelector('#pauseMenu').hidden = true; }
+    else if (action === 'transition') selectOption('transition');
+    else if (action === 'fit') selectOption('fit');
+    else if (action === 'speed') {
+      duration.value = Number(duration.value) >= 60 ? 5 : Number(duration.value) + 1;
+      duration.dispatchEvent(new Event('input'));
+    }
+  });
+  document.addEventListener('keydown', event => {
+    const menu = document.querySelector('#pauseMenu');
+    if (!menu.hidden) {
+      const options = [...document.querySelectorAll('.pause-option')];
+      const current = Math.max(0, options.findIndex(button => button === document.activeElement));
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        selectPauseOption((current + (event.key === 'ArrowDown' ? 1 : options.length - 1)) % options.length);
+      } else if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        options[current].click();
+      } else if (event.key === 'Escape' || event.key === 'Backspace') {
+        event.preventDefault();
+        menu.hidden = true;
+      }
+      return;
+    }
+    if (event.key === 'ArrowRight') { event.preventDefault(); show(index + 1); }
+    else if (event.key === 'ArrowLeft') { event.preventDefault(); show(index - 1); }
+    else if (event.key === 'ArrowUp') { event.preventDefault(); setPlaying(false); }
+    else if ((event.key === ' ' || event.key === 'Enter') && !event.target.matches('button,input,select,textarea')) {
+      event.preventDefault();
+      setPlaying(play.dataset.playing !== 'true');
+    }
+  });
+  updateClock();
+  updateGlass();
+  if (photo.complete && photo.naturalWidth) {
+    photo.style.animationPlayState = 'paused';
+    applyFit();
+    updatePhotoLabels();
+    preloadNext();
+  }
+</script>
+</body>
+</html>

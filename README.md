@@ -5,7 +5,7 @@ Eine leichte Diashow für Android TV und Fire TV. Sie ist für Fernseher gedacht
 ## Funktionen
 
 - **Dateien:** Bilder über den Dateiauswahldialog hinzufügen und einzeln aus der Vorschau löschen.
-- **Handy-Upload:** QR-Code im selben WLAN öffnen, Bilder auswählen und in Alben auf dem Fernseher sortieren. Uploads bleiben lokal im privaten App-Speicher.
+- **Handy-Upload:** QR-Code im selben WLAN öffnen, Bilder auswählen und in Alben auf dem Fernseher sortieren. Aufgaben und Notizen lassen sich ebenfalls vom Handy pflegen; Kalendertermine können nach Titel ein- oder ausgeblendet werden. Uploads bleiben lokal im privaten App-Speicher.
 - **Diashow:** Shuffle wählt zufällig aus den am wenigsten gezeigten Bildern. Die gespeicherten Wiedergabezahlen bleiben lokal über Neustarts hinweg erhalten. Ungesehene Bilder werden stärker gewichtet; die Auswahl darf innerhalb eines Unterschieds von bis zu drei Ansichten variieren. Die Bilddauer beträgt mindestens fünf Sekunden. Das aktuelle und das nächste Bild werden gepuffert; bei einem Decode-Fehler bleibt das aktuelle Bild stehen und das fehlerhafte Bild wird übersprungen. Erst nach erfolgreichem Vorladen blendet die App weich über. Die Bilddarstellung bietet Einpassen, Füllen, Strecken oder Ken-Burns-Zoom/Schwenk.
 - **Fernbedienung:** Mittlere Taste pausiert; das Kontextmenü verwaltet Bilder, Dauer, Übergang, Bilddarstellung, Alben und Schlaf-Timer. „Jetzt schlafen“ schaltet die Fotos aus; OK oder Zurück weckt die App wieder auf. Ein Wochenplan startet die Wiedergabe zum Beispiel Mo–Fr von 16:00 bis 21:00 Uhr und zeigt außerhalb dieser Zeit den Schlafbildschirm.
 - **Uhr, Datum und Wetter:** Optional über dem Foto oder im Schlafmodus anzeigen. Im Schlafmodus stehen Uhrzeit, Datum und Wetter gemeinsam mittig; das Wetter erscheint mit einem Vektorsymbol direkt unter dem Datum. Liquid-Glass-Optik ergänzt transparente Verläufe, Lichtkante und Schatten. Auf älteren Fire TVs bleibt der Effekt leichtgewichtig und verzichtet auf teuren Hintergrund-Blur. Wetter-Ort über Land (ISO-Code) und Postleitzahl angeben, etwa `DE` und `10115`. Die Wetteranzeige nutzt öffentliche Daten von Open-Meteo. Zeitplan und Schlaf-Timer steuern den App-Bildschirm, sie wecken den Fire TV nicht aus einem ausgeschalteten oder tief schlafenden Systemzustand.
@@ -13,7 +13,7 @@ Eine leichte Diashow für Android TV und Fire TV. Sie ist für Fernseher gedacht
 - **Dauerbetrieb:** Bildschirm während der Wiedergabe aktiv halten und App optional nach dem Fire-TV-Neustart öffnen.
 - **Updates:** Die App prüft GitHub Releases und bietet die aktuelle APK direkt zum Laden an.
 - **Ältere Fire TVs:** Mindestversion Android API 22 (Fire OS 5), inklusive klassischer APK-Signatur.
-- **Demo:** [Interaktive Vorschau](https://weisser-dev.github.io/fire-tv-diashow/) mit Bildformat, Ken-Burns-Bewegung, Schwenkdauer, Übergängen, intelligentem Shuffle, Schlafzustand, Uhr/Datum/Wetter, Liquid-Glass-Schalter und Fernbedienungs-Kontextmenü. Es werden keine Dateien über die Demo hochgeladen.
+- **Demo:** [Interaktive Vorschau](https://weisser-dev.github.io/fire-tv-diashow/) als 9:16-TV-Mockup mit der aktuellen Wiedergabeoberfläche, echten Fire-TV-Aufnahmen ohne Personen, Fernbedienungsnavigation, Bildformat, Ken-Burns-Bewegung, Vorladen, Abblend-Übergängen, intelligentem Shuffle, Schlafzustand, Uhr/Datum/Wetter, Kalender, Aufgaben, Notizen und QR-Telefonsteuerung. Die Demo zeigt „Optimized for Fire TV“ und lädt keine Dateien hoch.
 
 ## Handy-Upload und lokale Alben
 

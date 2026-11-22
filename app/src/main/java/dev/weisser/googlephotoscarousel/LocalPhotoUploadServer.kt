@@ -22,7 +22,9 @@ class LocalPhotoUploadServer(
     private val filesDir: File,
     private val onPhotoUploaded: (File, String) -> Unit,
     private val readPhoneContent: () -> String,
-    private val onPhoneContentUpdated: (String) -> Unit
+    private val onPhoneContentUpdated: (String) -> Unit,
+    private val readCalendarState: () -> String,
+    private val onCalendarHiddenTitlesUpdated: (String) -> Unit
 ) {
     private val token = ByteArray(24).also(SecureRandom()::nextBytes).joinToString("") { "%02x".format(it) }
     private val running = AtomicBoolean(false)
@@ -83,8 +85,10 @@ class LocalPhotoUploadServer(
             }
             when {
                 method == "GET" && rawPath == "/upload/$token" -> respond(client, 200, "text/html; charset=utf-8", uploadPage(readPhoneContent()))
+                method == "GET" && rawPath == "/api/calendar/$token" -> respond(client, 200, "application/json; charset=utf-8", readCalendarState())
                 method == "POST" && rawPath == "/api/upload/$token" -> receivePhoto(client, input, headers, query)
                 method == "POST" && rawPath == "/api/content/$token" -> receivePhoneContent(client, input, headers)
+                method == "POST" && rawPath == "/api/calendar/$token" -> receiveCalendarState(client, input, headers)
                 else -> respond(client, 404, "text/plain; charset=utf-8", "Nicht gefunden.")
             }
         }
@@ -117,6 +121,39 @@ class LocalPhotoUploadServer(
             return
         }
         onPhoneContentUpdated(json.toString())
+        respond(socket, 200, "application/json; charset=utf-8", "{\"ok\":true}")
+    }
+
+    private fun receiveCalendarState(socket: Socket, input: BufferedInputStream, headers: Map<String, String>) {
+        val length = headers["content-length"]?.toIntOrNull()
+        if (length == null || length < 0 || length > MAX_CALENDAR_BYTES) {
+            respond(socket, 413, "application/json; charset=utf-8", "{\"error\":\"Die Kalenderauswahl ist zu groß.\"}")
+            return
+        }
+        val bytes = ByteArray(length)
+        var offset = 0
+        while (offset < bytes.size) {
+            val count = input.read(bytes, offset, bytes.size - offset)
+            if (count < 0) {
+                respond(socket, 400, "application/json; charset=utf-8", "{\"error\":\"Die Kalenderauswahl wurde unvollständig übertragen.\"}")
+                return
+            }
+            offset += count
+        }
+        val hiddenTitles = runCatching { JSONObject(String(bytes, StandardCharsets.UTF_8)).optJSONArray("hiddenTitles") }.getOrNull()
+        if (hiddenTitles == null || hiddenTitles.length() > MAX_HIDDEN_CALENDAR_TITLES ||
+            (0 until hiddenTitles.length()).any { hiddenTitles.optString(it).trim().length > MAX_CALENDAR_TITLE_CHARACTERS }) {
+            respond(socket, 400, "application/json; charset=utf-8", "{\"error\":\"Ungültige Kalenderauswahl.\"}")
+            return
+        }
+        val normalized = org.json.JSONArray().apply {
+            val unique = linkedSetOf<String>()
+            for (index in 0 until hiddenTitles.length()) {
+                hiddenTitles.optString(index).trim().takeIf(String::isNotBlank)?.let(unique::add)
+            }
+            unique.take(MAX_HIDDEN_CALENDAR_TITLES).forEach(::put)
+        }
+        onCalendarHiddenTitlesUpdated(normalized.toString())
         respond(socket, 200, "application/json; charset=utf-8", "{\"ok\":true}")
     }
 
@@ -185,9 +222,11 @@ class LocalPhotoUploadServer(
         main{width:min(680px,100%);background:#1b222c;border:1px solid #394654;border-radius:22px;padding:26px}h1{font-size:27px;margin:0 0 8px}h2{font-size:19px;margin:24px 0 4px}p{line-height:1.5;color:#cbd2db}
         label{display:block;margin:18px 0 8px;font-weight:650}input,button,select,textarea{font:inherit;width:100%;padding:14px;border-radius:12px}input,select,textarea{background:#10141b;color:#fff;border:1px solid #526070}textarea{min-height:74px;resize:vertical}input[type=file]{padding:12px}select{appearance:auto}.check{display:flex;gap:12px;align-items:center;margin:16px 0}.check input{width:22px;height:22px;accent-color:#e8c98c}.check label{margin:0}.hidden{display:none}
         .lists{display:flex;flex-direction:column;gap:20px}.row,.note-row{display:grid;grid-template-columns:24px 1fr 38px;gap:10px;align-items:center;margin:8px 0;padding:10px;border:1px solid #394654;border-radius:12px;background:#151b23}.row input{width:22px;height:22px;accent-color:#e8c98c}.row span{overflow-wrap:anywhere}.note-row{grid-template-columns:1fr 38px}.note-row textarea{min-height:56px}.entry{display:grid;gap:8px}.entry button,.remove{width:auto;margin:0;padding:8px 12px}.remove{background:transparent;color:#cbd2db;border:1px solid #526070;font-size:22px}
+        .calendar-row{display:grid;grid-template-columns:1fr 48px;gap:12px;align-items:center;margin:8px 0;padding:12px;border:1px solid #394654;border-radius:12px;background:#151b23}.calendar-row strong{display:block;overflow-wrap:anywhere}.calendar-row small{display:block;color:#9da8b6;margin-top:4px}.eye{width:44px;height:44px;margin:0;padding:8px;background:#263340;color:#e8c98c;border:1px solid #526070;border-radius:12px;display:grid;place-items:center}.eye svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.eye.hidden-eye{color:#9da8b6}.eye:disabled{opacity:.55}.calendar-status{min-height:1.5em;color:#42d9ff;font-size:14px}
         button{margin-top:18px;border:0;background:#e8c98c;color:#10141b;font-weight:750}button:disabled{opacity:.55}.status{min-height:2em;color:#42d9ff;white-space:pre-line}.note{font-size:13px;color:#9da8b6}
         </style></head><body><main><h1>Stillframe vom Handy verwalten</h1>
         <p>Aufgaben abhaken, Notizen pflegen oder neue Fotos direkt im selben WLAN an den Fernseher senden.</p>
+        <section><h2>Kalender</h2><p class="note">Kommende Termine ausblenden. Das Auge blendet alle Einträge mit demselben Titel aus, zum Beispiel eine wiederkehrende Serie.</p><div id="calendar-events"></div><p class="calendar-status" id="calendar-status" aria-live="polite"></p></section>
         <div class="lists"><section><h2>Aufgaben</h2><div id="todos"></div><div class="entry"><input id="todo-input" maxlength="$MAX_NOTE_CHARACTERS" placeholder="Neue Aufgabe"><button type="button" id="add-todo">Aufgabe hinzufügen</button></div></section>
         <section><h2>Notizen</h2><div id="notes"></div><div class="entry"><input id="note-input" maxlength="$MAX_NOTE_CHARACTERS" placeholder="Neue Notiz"><button type="button" id="add-note">Notiz hinzufügen</button></div></section></div>
         <p class="status" id="content-status" aria-live="polite"></p><pre id="initial-data" class="hidden">${html(phoneContent)}</pre>
@@ -203,13 +242,18 @@ class LocalPhotoUploadServer(
         <script>
         const input=document.getElementById('photos'), album=document.getElementById('album'), newFolder=document.getElementById('new-folder'), newFolderWrap=document.getElementById('new-folder-wrap'), compress=document.getElementById('compress'), button=document.getElementById('send'), status=document.getElementById('status');
         const todoList=document.getElementById('todos'), noteList=document.getElementById('notes'), contentStatus=document.getElementById('content-status');
+        const calendarList=document.getElementById('calendar-events'), calendarStatus=document.getElementById('calendar-status');let calendarState={events:[],hiddenTitles:[]},savingCalendar=false;
         const content=JSON.parse(document.getElementById('initial-data').textContent||'{"notes":[],"todos":[]}');
         content.notes=Array.isArray(content.notes)?content.notes:[];content.todos=Array.isArray(content.todos)?content.todos:[];
         const saveContent=async()=>{contentStatus.textContent='Speichere …';try{const response=await fetch('/api/content/$token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(content)});const result=await response.json();if(!response.ok)throw Error(result.error||'Speichern fehlgeschlagen');contentStatus.textContent='Aufgaben und Notizen auf dem Fernseher gespeichert.'}catch(error){contentStatus.textContent=error.message||'Verbindung zum Fernseher fehlgeschlagen.'}};
+        const eyeSvg='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>',eyeOffSvg='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 3 18 18M10.6 10.6a2 2 0 0 0 2.8 2.8"/><path d="M9.9 5.2A10.8 10.8 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.1 3.9M6.2 6.2C3.5 8 2 12 2 12s3.6 7 10 7a10.8 10.8 0 0 0 4-.8"/></svg>';
+        function renderCalendar(){calendarList.replaceChildren();const events=Array.isArray(calendarState.events)?calendarState.events:[],hidden=new Set((calendarState.hiddenTitles||[]).map(x=>String(x).toLocaleLowerCase()));const groups=new Map();for(const event of events){if(!event||!event.title)continue;const key=String(event.title);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(event)}const upcoming=[...groups.entries()].sort((a,b)=>Number(a[1][0].startsAt)-Number(b[1][0].startsAt)).slice(0,40);if(!upcoming.length){calendarList.textContent='Keine kommenden Termine geladen.';return}for(const [title,occurrences] of upcoming){const next=occurrences[0],row=document.createElement('div');row.className='calendar-row';const info=document.createElement('div'),name=document.createElement('strong'),date=document.createElement('small');name.textContent=title;date.textContent=new Intl.DateTimeFormat(undefined,{weekday:'short',day:'numeric',month:'short',hour:next.allDay?undefined:'2-digit',minute:next.allDay?undefined:'2-digit'}).format(new Date(Number(next.startsAt)))+' · '+occurrences.length+' Termin'+(occurrences.length===1?'':'e');info.append(name,date);const button=document.createElement('button'),isHidden=hidden.has(title.toLocaleLowerCase()),manual=!!next.hiddenBySettings;button.type='button';button.className='eye'+(isHidden||manual?' hidden-eye':'');button.innerHTML=isHidden||manual?eyeOffSvg:eyeSvg;button.setAttribute('aria-label',manual?'In TV-Einstellungen ausgeblendet':isHidden?'Serie einblenden':'Serie ausblenden');button.title=button.getAttribute('aria-label');button.disabled=manual;button.onclick=()=>toggleCalendarTitle(title);row.append(info,button);calendarList.append(row)}}
+        async function loadCalendar(){try{const response=await fetch('/api/calendar/$token',{cache:'no-store'});if(!response.ok)throw Error('Kalender konnte nicht geladen werden.');calendarState=await response.json();renderCalendar()}catch(_){calendarList.textContent='Kalender gerade nicht erreichbar.'}}
+        async function toggleCalendarTitle(title){if(savingCalendar)return;savingCalendar=true;const before=[...(calendarState.hiddenTitles||[])],already=before.some(x=>String(x).toLocaleLowerCase()===title.toLocaleLowerCase());calendarState.hiddenTitles=already?before.filter(x=>String(x).toLocaleLowerCase()!==title.toLocaleLowerCase()):[...before,title];renderCalendar();calendarStatus.textContent='Speichere Kalenderauswahl …';try{const response=await fetch('/api/calendar/$token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hiddenTitles:calendarState.hiddenTitles})});const result=await response.json();if(!response.ok)throw Error(result.error||'Speichern fehlgeschlagen.');calendarStatus.textContent='Kalenderauswahl auf dem Fernseher gespeichert.'}catch(error){calendarState.hiddenTitles=before;renderCalendar();calendarStatus.textContent=error.message||'Verbindung zum Fernseher fehlgeschlagen.'}finally{savingCalendar=false}}
         function render(){todoList.replaceChildren();noteList.replaceChildren();content.todos.forEach((item,i)=>{const row=document.createElement('div');row.className='row';const check=document.createElement('input');check.type='checkbox';check.checked=!!item.done;check.onchange=()=>{item.done=check.checked;saveContent()};const text=document.createElement('span');text.textContent=item.text;const remove=document.createElement('button');remove.className='remove';remove.textContent='×';remove.setAttribute('aria-label','Aufgabe löschen');remove.onclick=()=>{content.todos.splice(i,1);render();saveContent()};row.append(check,text,remove);todoList.append(row)});content.notes.forEach((item,i)=>{const row=document.createElement('div');row.className='note-row';const text=document.createElement('textarea');text.value=item.text;text.maxLength=$MAX_NOTE_CHARACTERS;text.setAttribute('aria-label','Notiz');text.onchange=()=>{item.text=text.value;saveContent()};const remove=document.createElement('button');remove.className='remove';remove.textContent='×';remove.setAttribute('aria-label','Notiz löschen');remove.onclick=()=>{content.notes.splice(i,1);render();saveContent()};row.append(text,remove);noteList.append(row)})}
         const newId=()=>Date.now().toString(36)+Math.random().toString(36).slice(2);
         document.getElementById('add-todo').onclick=()=>{const field=document.getElementById('todo-input'),text=field.value.trim();if(!text)return;content.todos.push({id:newId(),text,done:false});field.value='';render();saveContent()};
-        document.getElementById('add-note').onclick=()=>{const field=document.getElementById('note-input'),text=field.value.trim();if(!text)return;content.notes.push({id:newId(),text});field.value='';render();saveContent()};render();
+        document.getElementById('add-note').onclick=()=>{const field=document.getElementById('note-input'),text=field.value.trim();if(!text)return;content.notes.push({id:newId(),text});field.value='';render();saveContent()};render();loadCalendar();setInterval(()=>{if(!savingCalendar)loadCalendar()},30000);
         album.addEventListener('change',()=>{const isNew=album.value==='__new__';newFolderWrap.classList.toggle('hidden',!isNew);if(isNew)newFolder.focus();});
         if(album.options.length===1||album.options[0].value==='__new__'){album.value='__new__';newFolderWrap.classList.remove('hidden');}
         async function prepare(file,compressEnabled){
@@ -282,6 +326,9 @@ class LocalPhotoUploadServer(
         private const val MAX_NOTE_CHARACTERS = 240
         private const val MAX_NOTES = 12
         private const val MAX_TODOS = 20
+        private const val MAX_CALENDAR_BYTES = 24_000
+        private const val MAX_CALENDAR_TITLE_CHARACTERS = 200
+        private const val MAX_HIDDEN_CALENDAR_TITLES = 100
         private val ALLOWED_EXTENSIONS = setOf("jpg", "jpeg", "png", "webp", "gif", "heic", "heif")
 
         fun scan(filesDir: File): List<UploadedPhoto> {

@@ -14,14 +14,9 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -70,6 +65,7 @@ import coil.compose.AsyncImage
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -97,6 +93,8 @@ class MainActivity : ComponentActivity() {
     private var uploadStatus by mutableStateOf("")
     private var uploadServer: LocalPhotoUploadServer? = null
     private var phoneContentUpdate by mutableStateOf<String?>(null)
+    private var phoneHiddenCalendarTitlesUpdate by mutableStateOf<String?>(null)
+    private var calendarEventsSnapshot by mutableStateOf<List<CalendarEvent>>(emptyList())
     private var remoteKeyHandler: ((Int) -> Boolean)? = null
     private val remoteHandledKeys = mutableSetOf<Int>()
     private var playbackControlsPulse by mutableIntStateOf(0)
@@ -245,11 +243,15 @@ class MainActivity : ComponentActivity() {
             var calendarEnabled by remember { mutableStateOf(prefs.getBoolean("calendar_enabled", false)) }
             var calendarFeedUrl by remember { mutableStateOf(prefs.getString("calendar_feed_url", "").orEmpty()) }
             var calendarBlacklist by remember { mutableStateOf(prefs.getString("calendar_blacklist", "").orEmpty()) }
+            var phoneHiddenCalendarTitles by remember { mutableStateOf(parseCalendarTitleList(prefs.getString("calendar_phone_hidden_titles", null))) }
             var calendarEvents by remember { mutableStateOf<List<CalendarEvent>>(emptyList()) }
             var calendarStatus by remember { mutableStateOf("") }
-            val visibleCalendarEvents = remember(calendarEvents, calendarBlacklist) {
+            val visibleCalendarEvents = remember(calendarEvents, calendarBlacklist, phoneHiddenCalendarTitles) {
                 val blockedTerms = calendarBlacklist.split(',', ';', '\n').map(String::trim).filter(String::isNotBlank)
-                calendarEvents.filterNot { event -> blockedTerms.any { event.title.contains(it, ignoreCase = true) } }
+                calendarEvents.filterNot { event ->
+                    blockedTerms.any { event.title.contains(it, ignoreCase = true) } ||
+                        phoneHiddenCalendarTitles.any { event.title.equals(it, ignoreCase = true) }
+                }
             }
             var notesEnabled by remember { mutableStateOf(prefs.getBoolean("notes_enabled", false)) }
             var noteText by remember { mutableStateOf(prefs.getString("note_text", "").orEmpty()) }
@@ -262,6 +264,14 @@ class MainActivity : ComponentActivity() {
                     phoneContentUpdate = null
                 }
             }
+            LaunchedEffect(phoneHiddenCalendarTitlesUpdate) {
+                phoneHiddenCalendarTitlesUpdate?.let { updated ->
+                    phoneHiddenCalendarTitles = parseCalendarTitleList(updated)
+                    prefs.edit().putString("calendar_phone_hidden_titles", updated).apply()
+                    phoneHiddenCalendarTitlesUpdate = null
+                }
+            }
+            LaunchedEffect(calendarEvents) { calendarEventsSnapshot = calendarEvents }
             LaunchedEffect(orientationChosen) {
                 if (orientationChosen && uploadServer == null && uploadUrl == null) startPhotoUpload(showDialog = false)
             }
@@ -272,6 +282,9 @@ class MainActivity : ComponentActivity() {
             val focusManager = LocalFocusManager.current
             val photoListState = rememberLazyListState()
             val uiScope = rememberCoroutineScope()
+            val transitionCover = remember { Animatable(0f) }
+            var slideTransitionJob by remember { mutableStateOf<Job?>(null) }
+            var transitionTargetIndex by remember { mutableIntStateOf(-1) }
             val settingsFocusRequester = remember { FocusRequester() }
             val localSourceFocusRequester = remember { FocusRequester() }
             val uploadSourceFocusRequester = remember { FocusRequester() }
@@ -299,6 +312,28 @@ class MainActivity : ComponentActivity() {
                 chooseNextImage(images, photoHistory, index, shuffle, failedPreloadPhotos)
             }
             val nextSlideImageModel = images.getOrNull(nextSlideIndex)?.removePrefix("uri:")?.removePrefix("file:")
+            val transitionToSlide: (Int) -> Unit = { target ->
+                if (target in images.indices && target != index) {
+                    slideTransitionJob?.cancel()
+                    transitionTargetIndex = target
+                    slideTransitionJob = uiScope.launch {
+                        val style = transitionStyle
+                        if (style == "cut") {
+                            transitionCover.snapTo(0f)
+                            index = target
+                            transitionTargetIndex = -1
+                        } else {
+                            val fadeDuration = (transitionDurationMillis(style) / 3).coerceIn(200, 300)
+                            transitionCover.animateTo(1f, tween(fadeDuration, easing = LinearEasing))
+                            delay(45)
+                            index = target
+                            delay(45)
+                            transitionCover.animateTo(0f, tween(fadeDuration, easing = LinearEasing))
+                            transitionTargetIndex = -1
+                        }
+                    }
+                }
+            }
             LaunchedEffect(index, nextSlideIndex) { loadedNextPhoto = null }
             val managerImages = remember(localPhotos, uploadedPhotos, managerAlbumFilter) {
                 val local = if (managerAlbumFilter == "*" || managerAlbumFilter == "__local__") localPhotos.map { "uri:$it" } else emptyList()
@@ -501,7 +536,7 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(playing, paused, index, images.size) {
                     logRemote("playback state playing=$playing paused=$paused index=$index/${images.size} rotation=$displayRotation")
                 }
-                DisposableEffect(playing, paused, sleeping, images.size, orientationChosen, displayRotation, setupConfirmSelected, sourceCardFocus, focusedSettingsNode, mainFocusNode, focusedAlbumIndex, uploadAlbums, selectedUploadAlbum, newestUploadsFirst, pauseMenuIndex, showSettings, showPhotoManager, message, uploadUrl, uploadDialogVisible, showPinSetup, pinEntry, pinPadIndex) {
+                DisposableEffect(playing, paused, sleeping, images.size, index, nextSlideIndex, transitionStyle, orientationChosen, displayRotation, setupConfirmSelected, sourceCardFocus, focusedSettingsNode, mainFocusNode, focusedAlbumIndex, uploadAlbums, selectedUploadAlbum, newestUploadsFirst, pauseMenuIndex, showSettings, showPhotoManager, message, uploadUrl, uploadDialogVisible, showPinSetup, pinEntry, pinPadIndex) {
                     remoteKeyHandler = when {
                         sleeping -> { code ->
                             if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_ENTER || code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_SPACE || code in KeyEvent.KEYCODE_DPAD_UP..KeyEvent.KEYCODE_DPAD_RIGHT) {
@@ -736,11 +771,11 @@ class MainActivity : ComponentActivity() {
                         playing && images.isNotEmpty() -> { code ->
                             when {
                                 (portraitUi && code == KeyEvent.KEYCODE_DPAD_DOWN) || (!portraitUi && code == KeyEvent.KEYCODE_DPAD_RIGHT) || code == KeyEvent.KEYCODE_MEDIA_NEXT -> {
-                                    index = nextSlideIndex
+                                    transitionToSlide(nextSlideIndex)
                                     true
                                 }
                                 (portraitUi && code == KeyEvent.KEYCODE_DPAD_UP) || (!portraitUi && code == KeyEvent.KEYCODE_DPAD_LEFT) || code == KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
-                                    index = (index - 1 + images.size) % images.size
+                                    transitionToSlide((index - 1 + images.size) % images.size)
                                     true
                                 }
                                 code == KeyEvent.KEYCODE_ENTER || code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_SPACE || code == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
@@ -770,7 +805,7 @@ class MainActivity : ComponentActivity() {
                             // is preloaded before the current slide is allowed to advance.
                             if (!ready) return@LaunchedEffect
                         }
-                        index = nextSlideIndex
+                        transitionToSlide(nextSlideIndex)
                     }
                 }
                 LaunchedEffect(playing, paused, sleeping, sleepTimerMinutes, sleepDeadline) {
@@ -838,13 +873,13 @@ class MainActivity : ComponentActivity() {
                     if (sleeping) {
                         SleepScreen(showClock, showDate, weatherEnabled, weatherLabel, glassOverlay, if (calendarEnabled) visibleCalendarEvents else emptyList(), if (notesEnabled) phoneContent else PhoneContent(), uploadUrl) { startPhotoUpload() }
                     } else if (playing && images.isNotEmpty()) {
-                        PlaybackView(images, index, nextSlideIndex, panZoom, seconds, motionSeconds, playing, paused, imageScaleMode, imagePaddingDp, playbackControlsPulse, transitionStyle, pauseMenuIndex, shuffle, sleepTimerMinutes,
+                        PlaybackView(images, index, nextSlideIndex, panZoom, seconds, motionSeconds, playing, paused, imageScaleMode, imagePaddingDp, playbackControlsPulse, transitionStyle, pauseMenuIndex, shuffle, sleepTimerMinutes, transitionCover.value, transitionCover.value > 0f, index == transitionTargetIndex,
                             showClock, showDate, weatherEnabled, weatherLabel, glassOverlay, if (calendarEnabled) visibleCalendarEvents else emptyList(), if (notesEnabled) phoneContent else PhoneContent(), uploadUrl,
                             onNextPreloaded = { loadedNextPhoto = it },
                             onNextPreloadFailed = { failedPreloadPhotos = failedPreloadPhotos + it },
                             onImageMotionRequired = { currentImageNeedsMotion = it },
                             onPause = { paused = true; pauseMenuIndex = 0 },
-                            onNext = { index = nextSlideIndex }, onPrevious = { index = (index - 1 + images.size) % images.size },
+                            onNext = { transitionToSlide(nextSlideIndex) }, onPrevious = { transitionToSlide((index - 1 + images.size) % images.size) },
                             onResume = { paused = false }, onAddImages = { startPhotoUpload() }, onAddFiles = { launchPhotoChooser() },
                             onCycleSpeed = { direction -> seconds = (seconds + direction).coerceIn(5, 60); prefs.edit().putInt("seconds", seconds).apply() },
                             onCycleMotionDuration = { direction -> motionSeconds = cycleValue(motionSeconds, listOf(15, 30, 45, 60), direction); prefs.edit().putInt("motion_seconds", motionSeconds).apply() },
@@ -1179,6 +1214,20 @@ class MainActivity : ComponentActivity() {
                     phoneContentUpdate = updated
                     uploadStatus = "Aufgaben und Notizen auf dem Fernseher gespeichert."
                 }
+            },
+            readCalendarState = {
+                serializeCalendarSnapshot(
+                    calendarEventsSnapshot,
+                    parseCalendarTitleList(prefs.getString("calendar_phone_hidden_titles", null)),
+                    prefs.getString("calendar_blacklist", "").orEmpty()
+                )
+            },
+            onCalendarHiddenTitlesUpdated = { updated ->
+                runOnUiThread {
+                    prefs.edit().putString("calendar_phone_hidden_titles", updated).apply()
+                    phoneHiddenCalendarTitlesUpdate = updated
+                    uploadStatus = "Kalenderauswahl auf dem Fernseher gespeichert."
+                }
             }
         )
         try {
@@ -1325,11 +1374,11 @@ private fun EmptyState() {
     }
 }
 
-@OptIn(ExperimentalAnimationApi::class)
 @Composable
 private fun PlaybackView(
     images: List<String>, index: Int, nextIndex: Int, panZoom: Boolean, seconds: Int, motionSeconds: Int, playing: Boolean,
     paused: Boolean, imageScaleMode: String, imagePaddingDp: Int, controlsPulse: Int, transitionStyle: String, pauseMenuIndex: Int, shuffle: Boolean, sleepTimerMinutes: Int,
+    transitionCoverAlpha: Float, transitionInFlight: Boolean, transitionIncoming: Boolean,
     showClock: Boolean, showDate: Boolean, showWeather: Boolean, weatherLabel: String, glassOverlay: Boolean, calendarEvents: List<CalendarEvent>, phoneContent: PhoneContent, uploadUrl: String?,
     onNextPreloaded: (String) -> Unit, onNextPreloadFailed: (String) -> Unit,
     onImageMotionRequired: (Boolean) -> Unit,
@@ -1344,21 +1393,11 @@ private fun PlaybackView(
         val density = LocalDensity.current
         val transitionMs = transitionDurationMillis(transitionStyle)
         var controlsVisible by remember { mutableStateOf(true) }
-        var lastTransitionModel by remember { mutableStateOf(model) }
-        var transitionInFlight by remember { mutableStateOf(false) }
-        LaunchedEffect(model, transitionStyle) {
-            if (lastTransitionModel != model) {
-                transitionInFlight = true
-                delay(transitionMs.toLong())
-                transitionInFlight = false
-            }
-            lastTransitionModel = model
-        }
         LaunchedEffect(paused, controlsPulse) {
             controlsVisible = true
             if (!paused) { delay(2800); controlsVisible = false }
         }
-        // Keep exactly the current and next photo warm. Remove the preload during a dissolve
+        // Keep exactly the current and next photo warm. Remove the preload during a transition
         // so an older Fire TV never has three full-screen decodes in memory at once.
         // The Fire TV AFTM stalls on every TextureView buffer swap when the portrait
         // surface is rotated into the landscape HDMI frame. Compose keeps image motion
@@ -1400,12 +1439,8 @@ private fun PlaybackView(
                     )
                 }
             )
-        } else AnimatedContent(targetState = model, modifier = Modifier.fillMaxSize(), transitionSpec = {
-            when (transitionStyle) {
-                "cut" -> androidx.compose.animation.EnterTransition.None togetherWith androidx.compose.animation.ExitTransition.None
-                else -> fadeIn(tween(transitionMs, easing = LinearEasing)) togetherWith fadeOut(tween(transitionMs, easing = LinearEasing))
-            }
-        }, label = "photo-transition") { photo ->
+        } else key(model) {
+            val photo = model
             var photoAspect by remember(photo) { mutableFloatStateOf(0f) }
             val panX = remember(photo) { Animatable(0f) }
             val panY = remember(photo) { Animatable(0f) }
@@ -1436,19 +1471,18 @@ private fun PlaybackView(
                 val travelY = with(density) { ((imageHeight * 1.045f - maxHeight) / 2f).toPx().coerceAtLeast(0f) }
 
                 LaunchedEffect(photo, photoAspect, motionRequired, playing, paused, transitionInFlight, motionDuration, travelX, travelY) {
-                    // A crossfade already composites two full-screen images. Stop both
-                    // Ken Burns animations while it runs; otherwise older TV GPUs have
-                    // to blend two moving textures at once. Keep the current transform
-                    // in place and resume motion after the dissolve completes.
+                    // The black cover keeps transitions to one full-screen photo at a
+                    // time. Freeze the outgoing frame in place; initialize the incoming
+                    // frame at its first Ken Burns pose, then resume movement after fade-in.
                     if (motionImage && playing && !paused && photo == model) {
                         val startX = if (horizontalOverflow) -travelX * direction else 0f
                         val startY = if (verticalOverflow) -travelY * direction else 0f
                         if (transitionInFlight) {
-                            // Enter the dissolve already at B's first frame. The incoming
-                            // image stays still during the fade, then moves from this pose.
-                            zoom.snapTo(1f)
-                            panX.snapTo(startX)
-                            panY.snapTo(startY)
+                            if (transitionIncoming) {
+                                zoom.snapTo(1f)
+                                panX.snapTo(startX)
+                                panY.snapTo(startY)
+                            }
                         } else {
                             zoom.snapTo(1f)
                             panX.snapTo(startX)
@@ -1501,6 +1535,9 @@ private fun PlaybackView(
                     }
                 )
             }
+        }
+        if (transitionCoverAlpha > 0f) {
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = transitionCoverAlpha.coerceIn(0f, 1f))))
         }
         if (showClock || showDate || showWeather && weatherLabel.isNotBlank() || calendarEvents.isNotEmpty() || phoneContent.hasContent || uploadUrl != null) {
             TimeWeatherOverlay(showClock, showDate, showWeather, weatherLabel, glassOverlay, imagePaddingDp, calendarEvents, phoneContent, uploadUrl, onOpenUploadQr)
@@ -1763,7 +1800,7 @@ private fun cycleValue(current: Int, choices: List<Int>, direction: Int): Int {
     return choices[(index + direction + choices.size) % choices.size]
 }
 
-private fun transitionName(style: String) = when (style) { "cut" -> "Direkt"; "crossfade" -> "Sanfte Überblendung"; else -> "Überblenden" }
+private fun transitionName(style: String) = when (style) { "cut" -> "Direkt"; "crossfade" -> "Sanft abblenden"; else -> "Abblenden" }
 private fun transitionDurationMillis(style: String) = when (style) { "cut" -> 0; "crossfade" -> 750; else -> 850 }
 private fun imageScaleName(mode: String) = when (mode) { "fill" -> "Füllen"; "stretch" -> "Strecken"; "ken_burns" -> "Zoom & Schwenk"; else -> "Einpassen" }
 private fun selectedAlbumLabel(images: List<String>, index: Int) = images.getOrNull(index)?.contains("upload-albums") == true
@@ -1796,6 +1833,27 @@ private fun serializePhoneContent(content: PhoneContent): String = JSONObject()
     .put("notes", org.json.JSONArray().apply { content.notes.forEach { put(JSONObject().put("text", it.text)) } })
     .put("todos", org.json.JSONArray().apply { content.todos.forEach { put(JSONObject().put("text", it.text).put("done", it.done)) } })
     .toString()
+
+private fun parseCalendarTitleList(raw: String?): List<String> = runCatching {
+    val array = org.json.JSONArray(raw.orEmpty())
+    (0 until array.length()).mapNotNull { array.optString(it).trim().takeIf(String::isNotBlank) }.distinctBy { it.lowercase() }
+}.getOrDefault(emptyList())
+
+private fun serializeCalendarSnapshot(events: List<CalendarEvent>, hiddenTitles: List<String>, manualBlacklist: String): String {
+    val terms = manualBlacklist.split(',', ';', '\n').map(String::trim).filter(String::isNotBlank)
+    return JSONObject().put("events", org.json.JSONArray().apply {
+        events.take(300).forEach { event ->
+            put(JSONObject()
+                .put("title", event.title)
+                .put("startsAt", event.startsAt.time)
+                .put("allDay", event.allDay)
+                .put("kind", event.kind.name.lowercase())
+                .put("hiddenBySettings", terms.any { event.title.contains(it, ignoreCase = true) })
+            )
+        }
+    }).put("hiddenTitles", org.json.JSONArray().apply { hiddenTitles.forEach { put(it) } })
+        .toString()
+}
 
 private fun loadPhotoHistory(raw: String?): Map<String, PhotoHistory> = runCatching {
     val root = JSONObject(raw ?: "{}")
