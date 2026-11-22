@@ -1403,6 +1403,11 @@ private fun PlaybackView(
         val nextModel = images.getOrNull(nextIndex)?.removePrefix("uri:")?.removePrefix("file:")
         val density = LocalDensity.current
         val transitionMs = transitionDurationMillis(transitionStyle)
+        // Keep the decoded aspect ratio from the invisible next-image preload. The
+        // incoming layer must use its final fit/crop geometry on its very first frame;
+        // otherwise it is briefly drawn with a viewport-sized fallback and then jumps
+        // once AsyncImage reports its intrinsic dimensions.
+        val photoAspectRatios = remember { mutableStateMapOf<String, Float>() }
         var controlsVisible by remember { mutableStateOf(true) }
         LaunchedEffect(paused, controlsPulse) {
             controlsVisible = true
@@ -1421,7 +1426,13 @@ private fun PlaybackView(
                 model = nextModel,
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize().padding(imagePaddingDp.dp).clipToBounds().graphicsLayer { alpha = 0f },
-                onSuccess = { onNextPreloaded(nextModel) },
+                onSuccess = { state ->
+                    val drawable = state.result.drawable
+                    if (drawable.intrinsicWidth > 0 && drawable.intrinsicHeight > 0) {
+                        photoAspectRatios[nextModel] = drawable.intrinsicWidth.toFloat() / drawable.intrinsicHeight
+                    }
+                    onNextPreloaded(nextModel)
+                },
                 onError = { onNextPreloadFailed(nextModel) },
                 contentScale = when (imageScaleMode) {
                     "fill" -> ContentScale.Crop
@@ -1471,7 +1482,7 @@ private fun PlaybackView(
             ) { photo ->
             Box(Modifier.fillMaxSize().zIndex(if (photo == model) -1f else 0f)) {
             key(photo) {
-            var photoAspect by remember(photo) { mutableFloatStateOf(0f) }
+            val photoAspect = photoAspectRatios[photo] ?: 0f
             val panX = remember(photo) { Animatable(0f) }
             val panY = remember(photo) { Animatable(0f) }
             val zoom = remember(photo) { Animatable(1f) }
@@ -1541,11 +1552,10 @@ private fun PlaybackView(
                     model = photo,
                     contentDescription = "Slideshow Foto",
                     onSuccess = { state ->
-                        if (photo == model) {
-                            val width = state.result.drawable.intrinsicWidth
-                            val height = state.result.drawable.intrinsicHeight
-                            photoAspect = if (width > 0 && height > 0) width.toFloat() / height else viewportAspect
-                        }
+                        val width = state.result.drawable.intrinsicWidth
+                        val height = state.result.drawable.intrinsicHeight
+                        if (width > 0 && height > 0) photoAspectRatios[photo] = width.toFloat() / height
+                        else if (photo == model && photoAspect <= 0f) photoAspectRatios[photo] = viewportAspect
                     },
                     modifier = if (motionImage) {
                         Modifier.requiredSize(imageWidth, imageHeight).graphicsLayer {
