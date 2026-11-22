@@ -22,6 +22,7 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -64,6 +65,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.zIndex
 import androidx.lifecycle.lifecycleScope
 import androidx.core.content.FileProvider
 import coil.compose.AsyncImage
@@ -318,9 +320,6 @@ class MainActivity : ComponentActivity() {
                         val style = transitionStyle
                         index = target
                         if (style == "cut") {
-                            transitionTargetIndex = -1
-                        } else {
-                            delay(transitionDurationMillis(style).toLong())
                             transitionTargetIndex = -1
                         }
                     }
@@ -782,8 +781,8 @@ class MainActivity : ComponentActivity() {
                     }
                     onDispose { remoteKeyHandler = null }
                 }
-                LaunchedEffect(images.size, index, nextSlideIndex, playing, paused, seconds, shuffle, panZoom, currentImageNeedsMotion, motionSeconds, loadedNextPhoto) {
-                    if (playing && !paused && images.size > 1) {
+                LaunchedEffect(images.size, index, nextSlideIndex, playing, paused, seconds, shuffle, panZoom, currentImageNeedsMotion, motionSeconds, loadedNextPhoto, transitionTargetIndex) {
+                    if (playing && !paused && images.size > 1 && transitionTargetIndex < 0) {
                         val slideSeconds = if (panZoom && currentImageNeedsMotion) maxOf(seconds, motionSeconds, 5) else maxOf(seconds, 5)
                         delay(slideSeconds * 1000L)
                         val targetModel = nextSlideImageModel
@@ -812,6 +811,9 @@ class MainActivity : ComponentActivity() {
                         paused = false
                         sleepDeadline = 0L
                     }
+                }
+                LaunchedEffect(playing) {
+                    if (!playing) transitionTargetIndex = -1
                 }
                 DisposableEffect(playing, sleeping) {
                     if (playing || sleeping && showClock || scheduleEnabled) {
@@ -866,6 +868,7 @@ class MainActivity : ComponentActivity() {
                         SleepScreen(showClock, showDate, weatherEnabled, weatherLabel, glassOverlay, if (calendarEnabled) visibleCalendarEvents else emptyList(), if (notesEnabled) phoneContent else PhoneContent(), uploadUrl) { startPhotoUpload() }
                     } else if (playing && images.isNotEmpty()) {
                         PlaybackView(images, index, nextSlideIndex, panZoom, seconds, motionSeconds, playing, paused, imageScaleMode, imagePaddingDp, playbackControlsPulse, transitionStyle, pauseMenuIndex, shuffle, sleepTimerMinutes, transitionTargetIndex >= 0, index == transitionTargetIndex,
+                            onTransitionComplete = { if (transitionTargetIndex == index) transitionTargetIndex = -1 },
                             showClock, showDate, weatherEnabled, weatherLabel, glassOverlay, if (calendarEnabled) visibleCalendarEvents else emptyList(), if (notesEnabled) phoneContent else PhoneContent(), uploadUrl,
                             onNextPreloaded = { loadedNextPhoto = it },
                             onNextPreloadFailed = { failedPreloadPhotos = failedPreloadPhotos + it },
@@ -1386,7 +1389,7 @@ private fun EmptyState() {
 private fun PlaybackView(
     images: List<String>, index: Int, nextIndex: Int, panZoom: Boolean, seconds: Int, motionSeconds: Int, playing: Boolean,
     paused: Boolean, imageScaleMode: String, imagePaddingDp: Int, controlsPulse: Int, transitionStyle: String, pauseMenuIndex: Int, shuffle: Boolean, sleepTimerMinutes: Int,
-    transitionInFlight: Boolean, transitionIncoming: Boolean,
+    transitionInFlight: Boolean, transitionIncoming: Boolean, onTransitionComplete: () -> Unit,
     showClock: Boolean, showDate: Boolean, showWeather: Boolean, weatherLabel: String, glassOverlay: Boolean, calendarEvents: List<CalendarEvent>, phoneContent: PhoneContent, uploadUrl: String?,
     onNextPreloaded: (String) -> Unit, onNextPreloadFailed: (String) -> Unit,
     onImageMotionRequired: (Boolean) -> Unit,
@@ -1448,8 +1451,14 @@ private fun PlaybackView(
                 }
             )
         } else {
-            AnimatedContent(
-                targetState = model,
+            val imageTransition = updateTransition(targetState = model, label = "slideshow-image-transition")
+            LaunchedEffect(imageTransition.targetState) {
+                if (imageTransition.currentState != imageTransition.targetState) {
+                    snapshotFlow { imageTransition.currentState == imageTransition.targetState }.first { it }
+                    onTransitionComplete()
+                }
+            }
+            imageTransition.AnimatedContent(
                 transitionSpec = {
                     if (transitionStyle == "cut") {
                         EnterTransition.None togetherWith ExitTransition.None
@@ -1458,9 +1467,9 @@ private fun PlaybackView(
                     }.apply { targetContentZIndex = -1f }
                 },
                 modifier = Modifier.fillMaxSize(),
-                contentKey = { it },
-                label = "slideshow-image-crossfade"
+                contentKey = { it }
             ) { photo ->
+            Box(Modifier.fillMaxSize().zIndex(if (photo == model) -1f else 0f)) {
             key(photo) {
             var photoAspect by remember(photo) { mutableFloatStateOf(0f) }
             val panX = remember(photo) { Animatable(0f) }
@@ -1555,6 +1564,7 @@ private fun PlaybackView(
                         else -> ContentScale.Fit
                     }
                 )
+            }
             }
             }
             }
