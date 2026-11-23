@@ -83,6 +83,8 @@ class MainActivity : ComponentActivity() {
     private var uploadUrl by mutableStateOf<String?>(null)
     private var uploadDialogVisible by mutableStateOf(false)
     private var uploadStatus by mutableStateOf("")
+    private lateinit var libraryDir: File
+    @Volatile private var backupHistory: Map<String, PhotoHistory>? = null
     private var uploadServer: LocalPhotoUploadServer? = null
     private var phoneContentUpdate by mutableStateOf<String?>(null)
     private var phoneHiddenCalendarTitles by mutableStateOf<List<String>>(emptyList())
@@ -162,6 +164,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val photoPrefs = getSharedPreferences("carousel", MODE_PRIVATE)
+        libraryDir = FrameBackup.activeDirectory(filesDir, photoPrefs)
+        lifecycleScope.launch(Dispatchers.IO) { FrameBackup.cleanInactive(filesDir, photoPrefs) }
         localPhotoUris = photoPrefs.getStringSet("local_photos", emptySet()).orEmpty().toList()
         phoneHiddenCalendarTitles = parseCalendarTitleList(photoPrefs.getString("calendar_phone_hidden_titles", null))
         photoPrefs.edit().remove("google_photos").apply()
@@ -287,10 +291,13 @@ class MainActivity : ComponentActivity() {
                 uploadedPhotos.filter { selectedUploadAlbum == "*" || it.album == selectedUploadAlbum }
                 .let { if (newestUploadsFirst) it.sortedByDescending(UploadedPhoto::modifiedAt) else it.sortedBy(UploadedPhoto::modifiedAt) }
             }
-            val images = remember(localPhotos, selectedUploads, selectedUploadAlbum) {
+            var hiddenPhotos by remember { mutableStateOf(prefs.getStringSet(FrameBackup.HIDDEN, emptySet()).orEmpty().toSet()) }
+            val albumImages = remember(localPhotos, selectedUploads, selectedUploadAlbum) {
                 if (selectedUploadAlbum != "*") selectedUploads.map { "file:${it.path}" }
                 else (localPhotos.map { "uri:$it" } + selectedUploads.map { "file:${it.path}" }).distinct()
             }
+            val images = remember(albumImages, hiddenPhotos) { albumImages.filterNot(hiddenPhotos::contains) }
+            val librarySize = localPhotos.size + uploadedPhotos.size
             var nextSlideIndex by remember(images, index, shuffle, failedPreloadPhotos) { mutableIntStateOf(-1) }
             LaunchedEffect(images, index, playing, shuffle, failedPreloadPhotos, photoHistoryLoaded) {
                 if (!playing || images.isEmpty()) return@LaunchedEffect
@@ -346,10 +353,10 @@ class MainActivity : ComponentActivity() {
             }
             LaunchedEffect(images.size) {
                 focusedPhotoIndex = focusedPhotoIndex.coerceIn(0, (images.size - 1).coerceAtLeast(0))
-                if (images.isEmpty()) photoManagerTarget = "clear"
+                if (images.isEmpty()) photoManagerTarget = "manage"
             }
             LaunchedEffect(Unit) {
-                val historyFile = File(filesDir, "photo-history.json")
+                val historyFile = File(libraryDir, FrameBackup.HISTORY)
                 val savedHistory = withContext(Dispatchers.IO) {
                     val historyAtomicFile = AtomicFile(historyFile)
                     val existing = runCatching { historyAtomicFile.openRead().bufferedReader().use { it.readText() } }.getOrNull()
@@ -365,6 +372,9 @@ class MainActivity : ComponentActivity() {
                 }
                 photoHistory = withContext(Dispatchers.Default) { loadPhotoHistory(savedHistory) }
                 photoHistoryLoaded = true
+            }
+            LaunchedEffect(photoHistoryLoaded) {
+                if (photoHistoryLoaded) snapshotFlow { photoHistory }.collect { backupHistory = it }
             }
             LaunchedEffect(images, photoHistoryLoaded) {
                 if (!photoHistoryLoaded) return@LaunchedEffect
@@ -386,7 +396,7 @@ class MainActivity : ComponentActivity() {
             }
             LaunchedEffect(photoHistoryLoaded) {
                 if (!photoHistoryLoaded) return@LaunchedEffect
-                val historyFile = File(filesDir, "photo-history.json")
+                val historyFile = File(libraryDir, FrameBackup.HISTORY)
                 while (true) {
                     delay(60_000)
                     val snapshot = photoHistory
@@ -467,7 +477,7 @@ class MainActivity : ComponentActivity() {
                 }
                 fun navigateMainFocus(code: Int, from: Int = mainFocusNode): Boolean {
                     if (code !in setOf(KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT)) return false
-                    val photoNode = if (images.isNotEmpty()) 5 else 7
+                    val photoNode = if (librarySize > 0) 5 else 7
                     val albumNode = if (uploadAlbums.isNotEmpty()) 3 else photoNode
                     val updateBannerVisible = updateRelease != null && !updateBusy
                     val next = if (portraitUi) when (from) {
@@ -479,7 +489,7 @@ class MainActivity : ComponentActivity() {
                         3 -> when (code) { KeyEvent.KEYCODE_DPAD_UP -> 2; KeyEvent.KEYCODE_DPAD_DOWN -> 4; else -> null }
                         4 -> when (code) { KeyEvent.KEYCODE_DPAD_UP -> 3; KeyEvent.KEYCODE_DPAD_DOWN -> photoNode; else -> null }
                         5 -> when (code) { KeyEvent.KEYCODE_DPAD_UP -> if (uploadAlbums.isNotEmpty()) 4 else 2; KeyEvent.KEYCODE_DPAD_DOWN -> 7; else -> null }
-                        7 -> if (code == KeyEvent.KEYCODE_DPAD_UP) if (images.isNotEmpty()) 5 else if (uploadAlbums.isNotEmpty()) 4 else 2 else null
+                        7 -> if (code == KeyEvent.KEYCODE_DPAD_UP) if (librarySize > 0) 5 else if (uploadAlbums.isNotEmpty()) 4 else 2 else null
                         else -> null
                     } else when (from) {
                         0 -> if (code == KeyEvent.KEYCODE_DPAD_DOWN) 6 else null
@@ -490,13 +500,29 @@ class MainActivity : ComponentActivity() {
                         3 -> when (code) { KeyEvent.KEYCODE_DPAD_UP -> 2; KeyEvent.KEYCODE_DPAD_DOWN -> 4; else -> null }
                         4 -> when (code) { KeyEvent.KEYCODE_DPAD_UP -> 3; KeyEvent.KEYCODE_DPAD_DOWN -> photoNode; else -> null }
                         5 -> when (code) { KeyEvent.KEYCODE_DPAD_UP -> 4; KeyEvent.KEYCODE_DPAD_DOWN -> 7; else -> null }
-                        7 -> if (code == KeyEvent.KEYCODE_DPAD_UP) if (images.isNotEmpty()) 5 else if (uploadAlbums.isNotEmpty()) 4 else 2 else null
+                        7 -> if (code == KeyEvent.KEYCODE_DPAD_UP) if (librarySize > 0) 5 else if (uploadAlbums.isNotEmpty()) 4 else 2 else null
                         else -> null
                     }
                     if (next != null) focusMainNode(next)
                     return true
                 }
+                fun setHiddenPhotos(updated: Set<String>) {
+                    hiddenPhotos = updated
+                    prefs.edit().putStringSet(FrameBackup.HIDDEN, updated).apply()
+                }
+                fun hideCurrentPhoto() {
+                    val current = images.getOrNull(index) ?: return
+                    requestedSlide = null
+                    val remaining = images.filterNot { it == current }
+                    val next = images.getOrNull(nextSlideIndex)?.takeIf { it in remaining }
+                    index = if (next != null) remaining.indexOf(next) else if (index in remaining.indices) index else 0
+                    paused = false
+                    playing = remaining.isNotEmpty()
+                    pauseMenuIndex = 0
+                    setHiddenPhotos(hiddenPhotos + current)
+                }
                 fun removePhoto(model: String) {
+                    if (model in hiddenPhotos) setHiddenPhotos(hiddenPhotos - model)
                     if (model.startsWith("uri:")) {
                         val uri = Uri.parse(model.removePrefix("uri:"))
                         localPhotoUris = localPhotoUris.filterNot { it == uri.toString() }
@@ -520,7 +546,7 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(playing, paused, index, images.size) {
                     logRemote("playback state playing=$playing paused=$paused index=$index/${images.size} rotation=$displayRotation")
                 }
-                DisposableEffect(playing, paused, sleeping, images.size, index, nextSlideIndex, transitionStyle, orientationChosen, displayRotation, setupConfirmSelected, sourceCardFocus, focusedSettingsNode, mainFocusNode, focusedAlbumIndex, uploadAlbums, selectedUploadAlbum, newestUploadsFirst, pauseMenuIndex, showSettings, showPhotoManager, message, uploadUrl, uploadDialogVisible, showPinSetup, pinEntry, pinPadIndex) {
+                DisposableEffect(playing, paused, sleeping, images, librarySize, index, nextSlideIndex, transitionStyle, orientationChosen, displayRotation, setupConfirmSelected, sourceCardFocus, focusedSettingsNode, mainFocusNode, focusedAlbumIndex, uploadAlbums, selectedUploadAlbum, newestUploadsFirst, pauseMenuIndex, showSettings, showPhotoManager, message, uploadUrl, uploadDialogVisible, showPinSetup, pinEntry, pinPadIndex) {
                     remoteKeyHandler = when {
                         sleeping -> { code ->
                             if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_ENTER || code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_SPACE || code in KeyEvent.KEYCODE_DPAD_UP..KeyEvent.KEYCODE_DPAD_RIGHT) {
@@ -717,17 +743,17 @@ class MainActivity : ComponentActivity() {
                             when (code) {
                                 KeyEvent.KEYCODE_BACK -> { playing = false; paused = false; true }
                                 KeyEvent.KEYCODE_DPAD_UP -> { pauseMenuIndex = (pauseMenuIndex - 1).coerceAtLeast(0); true }
-                                KeyEvent.KEYCODE_DPAD_DOWN -> { pauseMenuIndex = (pauseMenuIndex + 1).coerceAtMost(11); true }
+                                KeyEvent.KEYCODE_DPAD_DOWN -> { pauseMenuIndex = (pauseMenuIndex + 1).coerceAtMost(12); true }
                                 KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
                                     val direction = if (code == KeyEvent.KEYCODE_DPAD_RIGHT) 1 else -1
                                     when (pauseMenuIndex) {
                                         2 -> { shuffle = !shuffle; prefs.edit().putBoolean("shuffle", shuffle).apply() }
-                                        5 -> { seconds = (seconds + direction).coerceIn(5, 60); prefs.edit().putInt("seconds", seconds).apply() }
-                                        6 -> { motionSeconds = cycleValue(motionSeconds, listOf(15, 30, 45, 60), direction); prefs.edit().putInt("motion_seconds", motionSeconds).apply() }
-                                        7 -> { transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut"), direction); prefs.edit().putString("transition_style", transitionStyle).apply() }
-                                        8 -> { imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch", "ken_burns"), direction); prefs.edit().putString("image_scale_mode", imageScaleMode).apply() }
-                                        9 -> { focusedAlbumIndex = (focusedAlbumIndex + direction).coerceIn(0, uploadAlbums.size); selectedUploadAlbum = if (focusedAlbumIndex == 0) "*" else uploadAlbums.getOrNull(focusedAlbumIndex - 1) ?: "*"; prefs.edit().putString("selected_upload_album", selectedUploadAlbum).apply() }
-                                        10 -> { sleepTimerMinutes = cycleValue(sleepTimerMinutes, listOf(0, 15, 30, 60), direction); prefs.edit().putInt("sleep_timer_minutes", sleepTimerMinutes).apply(); sleepDeadline = if (sleepTimerMinutes == 0) 0L else System.currentTimeMillis() + sleepTimerMinutes * 60_000L }
+                                        6 -> { seconds = (seconds + direction).coerceIn(5, 60); prefs.edit().putInt("seconds", seconds).apply() }
+                                        7 -> { motionSeconds = cycleValue(motionSeconds, listOf(15, 30, 45, 60), direction); prefs.edit().putInt("motion_seconds", motionSeconds).apply() }
+                                        8 -> { transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut"), direction); prefs.edit().putString("transition_style", transitionStyle).apply() }
+                                        9 -> { imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch", "ken_burns"), direction); prefs.edit().putString("image_scale_mode", imageScaleMode).apply() }
+                                        10 -> { focusedAlbumIndex = (focusedAlbumIndex + direction).coerceIn(0, uploadAlbums.size); selectedUploadAlbum = if (focusedAlbumIndex == 0) "*" else uploadAlbums.getOrNull(focusedAlbumIndex - 1) ?: "*"; prefs.edit().putString("selected_upload_album", selectedUploadAlbum).apply() }
+                                        11 -> { sleepTimerMinutes = cycleValue(sleepTimerMinutes, listOf(0, 15, 30, 60), direction); prefs.edit().putInt("sleep_timer_minutes", sleepTimerMinutes).apply(); sleepDeadline = if (sleepTimerMinutes == 0) 0L else System.currentTimeMillis() + sleepTimerMinutes * 60_000L }
                                     }
                                     true
                                 }
@@ -736,15 +762,16 @@ class MainActivity : ComponentActivity() {
                                         0 -> paused = false
                                         1 -> { sleeping = true; manualSleepOverride = true; playing = false; paused = false; sleepDeadline = 0L }
                                         2 -> { shuffle = !shuffle; prefs.edit().putBoolean("shuffle", shuffle).apply() }
-                                        3 -> startPhotoUpload()
-                                        4 -> launchPhotoChooser()
-                                        5 -> seconds = if (seconds >= 60) 5 else seconds + 1
-                                        6 -> { motionSeconds = cycleValue(motionSeconds, listOf(15, 30, 45, 60), 1); prefs.edit().putInt("motion_seconds", motionSeconds).apply() }
-                                        7 -> transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut"), 1)
-                                        8 -> imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch", "ken_burns"), 1)
-                                        9 -> { focusedAlbumIndex = (focusedAlbumIndex + 1).coerceIn(0, uploadAlbums.size); selectedUploadAlbum = if (focusedAlbumIndex == 0) "*" else uploadAlbums.getOrNull(focusedAlbumIndex - 1) ?: "*" }
-                                        10 -> { sleepTimerMinutes = cycleValue(sleepTimerMinutes, listOf(0, 15, 30, 60), 1); prefs.edit().putInt("sleep_timer_minutes", sleepTimerMinutes).apply(); sleepDeadline = if (sleepTimerMinutes == 0) 0L else System.currentTimeMillis() + sleepTimerMinutes * 60_000L }
-                                        11 -> { playing = false; paused = false; sleepDeadline = 0L }
+                                        3 -> hideCurrentPhoto()
+                                        4 -> startPhotoUpload()
+                                        5 -> launchPhotoChooser()
+                                        6 -> seconds = if (seconds >= 60) 5 else seconds + 1
+                                        7 -> { motionSeconds = cycleValue(motionSeconds, listOf(15, 30, 45, 60), 1); prefs.edit().putInt("motion_seconds", motionSeconds).apply() }
+                                        8 -> transitionStyle = cycleValue(transitionStyle, listOf("fade", "crossfade", "cut"), 1)
+                                        9 -> imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch", "ken_burns"), 1)
+                                        10 -> { focusedAlbumIndex = (focusedAlbumIndex + 1).coerceIn(0, uploadAlbums.size); selectedUploadAlbum = if (focusedAlbumIndex == 0) "*" else uploadAlbums.getOrNull(focusedAlbumIndex - 1) ?: "*" }
+                                        11 -> { sleepTimerMinutes = cycleValue(sleepTimerMinutes, listOf(0, 15, 30, 60), 1); prefs.edit().putInt("sleep_timer_minutes", sleepTimerMinutes).apply(); sleepDeadline = if (sleepTimerMinutes == 0) 0L else System.currentTimeMillis() + sleepTimerMinutes * 60_000L }
+                                        12 -> { playing = false; paused = false; sleepDeadline = 0L }
                                     }
                                     prefs.edit().putInt("seconds", seconds).putString("transition_style", transitionStyle).putString("image_scale_mode", imageScaleMode).putString("selected_upload_album", selectedUploadAlbum).apply()
                                     true
@@ -872,6 +899,7 @@ class MainActivity : ComponentActivity() {
                             onCycleScale = { direction -> imageScaleMode = cycleValue(imageScaleMode, listOf("fit", "fill", "stretch", "ken_burns"), direction); prefs.edit().putString("image_scale_mode", imageScaleMode).apply() },
                             onToggleShuffle = { shuffle = !shuffle; prefs.edit().putBoolean("shuffle", shuffle).apply() }, onOpenUploadQr = { startPhotoUpload() },
                             onCycleSleepTimer = { direction -> sleepTimerMinutes = cycleValue(sleepTimerMinutes, listOf(0, 15, 30, 60), direction); prefs.edit().putInt("sleep_timer_minutes", sleepTimerMinutes).apply(); sleepDeadline = if (sleepTimerMinutes == 0) 0L else System.currentTimeMillis() + sleepTimerMinutes * 60_000L },
+                            onHidePhoto = ::hideCurrentPhoto,
                             onSleepNow = { sleeping = true; manualSleepOverride = true; playing = false; paused = false; sleepDeadline = 0L },
                             onExit = { playing = false; paused = false; sleepDeadline = 0L })
                     } else if (modalVisible) {
@@ -985,15 +1013,16 @@ class MainActivity : ComponentActivity() {
                                     Text("DEINE PRÄSENTATION", color = Color(0xFF9DA8B6), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
                                     Text(if (images.isEmpty()) "Bilder hinzufügen, um zu starten" else "${images.size} Bilder bereit", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
                                 }
-                                if (images.isNotEmpty()) TextButton(
+                                if (librarySize > 0) TextButton(
                                     modifier = Modifier.focusRequester(managePhotosFocusRequester)
                                         .onFocusChanged { managePhotosButtonFocused = it.isFocused; if (it.isFocused) { mainFocusNode = 5; photoManagerTarget = "manage" } }
                                         .then(if (managePhotosButtonFocused || mainFocusNode == 5 && photoManagerTarget == "manage") Modifier.border(4.dp, RemoteFocus, RoundedCornerShape(12.dp)) else Modifier),
                                     onClick = { showPhotoManager = true; selectedPhotoModels = emptySet(); photoManagerDialogFocus = -1 }
-                                ) { Text("Bilder verwalten (${images.size})", color = if (managePhotosButtonFocused || mainFocusNode == 5 && photoManagerTarget == "manage") Color.White else Color(0xFFADB7C4)) }
+                                ) { Text("Bilder verwalten ($librarySize)", color = if (managePhotosButtonFocused || mainFocusNode == 5 && photoManagerTarget == "manage") Color.White else Color(0xFFADB7C4)) }
                             }
                             Spacer(Modifier.height(12.dp))
-                            if (images.isEmpty()) EmptyState()
+                            if (images.isEmpty() && albumImages.isNotEmpty()) Text("Alle Bilder dieses Albums sind ausgeblendet. Unter „Bilder verwalten“ kannst du sie wieder einblenden.", color = Color.White)
+                            else if (images.isEmpty()) EmptyState()
                             else {
                                 LazyRow(state = photoListState, horizontalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 8.dp)) {
                                     itemsIndexed(images) { i, model ->
@@ -1117,6 +1146,12 @@ class MainActivity : ComponentActivity() {
                                         }
                                         TextButton(onClick = { confirmDeleteSelected = true }, enabled = selectedPhotoModels.isNotEmpty()) { Text("Löschen (${selectedPhotoModels.size})") }
                                     }
+                                    if (selectedPhotoModels.any(hiddenPhotos::contains)) {
+                                        TextButton(onClick = {
+                                            setHiddenPhotos(hiddenPhotos - selectedPhotoModels)
+                                            selectedPhotoModels = emptySet()
+                                        }) { Text("Auswahl wieder einblenden") }
+                                    }
                                     LazyVerticalGrid(columns = GridCells.Fixed(2), modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         gridItemsIndexed(managerImages) { i, model ->
                                             val isSelected = model in selectedPhotoModels
@@ -1129,6 +1164,7 @@ class MainActivity : ComponentActivity() {
                                                 horizontalAlignment = Alignment.CenterHorizontally
                                             ) {
                                                 AsyncImage(model.removePrefix("uri:").removePrefix("file:"), "Foto ${i + 1}", Modifier.fillMaxWidth().height(118.dp).clip(RoundedCornerShape(9.dp)).padding(4.dp), contentScale = ContentScale.Crop)
+                                                if (model in hiddenPhotos) Text("Ausgeblendet", color = Accent, fontSize = 12.sp)
                                                 Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                                                     Text(model.substringAfterLast('/').substringAfterLast(':').takeLast(23), color = Color.White, modifier = Modifier.weight(1f), maxLines = 1, fontSize = 11.sp)
                                                     Checkbox(checked = isSelected, onCheckedChange = { checked -> selectedPhotoModels = if (checked) selectedPhotoModels + model else selectedPhotoModels - model })
@@ -1179,7 +1215,7 @@ class MainActivity : ComponentActivity() {
 
     private fun refreshUploadedPhotos() {
         lifecycleScope.launch(Dispatchers.IO) {
-            val photos = LocalPhotoUploadServer.scan(filesDir)
+            val photos = LocalPhotoUploadServer.scan(libraryDir)
             withContext(Dispatchers.Main) { uploadedPhotos = photos }
         }
     }
@@ -1191,7 +1227,9 @@ class MainActivity : ComponentActivity() {
         }
         val prefs = getSharedPreferences("carousel", MODE_PRIVATE)
         val server = LocalPhotoUploadServer(
-            filesDir = filesDir,
+            filesDir = libraryDir,
+            backup = FrameBackup(this, libraryDir) { backupHistory },
+            onRestored = { runOnUiThread { recreate() } },
             onPhotoUploaded = { _, _ ->
                 runOnUiThread {
                     refreshUploadedPhotos()
@@ -1203,13 +1241,13 @@ class MainActivity : ComponentActivity() {
                 serializePhoneContent(parsePhoneContent(prefs.getString("phone_content", null), legacy))
             },
             onPhoneContentUpdated = { updated ->
+                val parsed = parsePhoneContent(updated, "")
+                val summary = buildList {
+                    parsed.todos.forEach { add("${if (it.done) "☑" else "□"} ${it.text}") }
+                    parsed.notes.forEach { add(it.text) }
+                }.joinToString("\n")
+                prefs.edit().putString("phone_content", updated).putString("note_text", summary).putBoolean("notes_enabled", true).apply()
                 runOnUiThread {
-                    val parsed = parsePhoneContent(updated, "")
-                    val summary = buildList {
-                        parsed.todos.forEach { add("${if (it.done) "☑" else "□"} ${it.text}") }
-                        parsed.notes.forEach { add(it.text) }
-                    }.joinToString("\n")
-                    prefs.edit().putString("phone_content", updated).putString("note_text", summary).putBoolean("notes_enabled", true).apply()
                     phoneContentUpdate = updated
                     uploadStatus = "Aufgaben und Notizen auf dem Fernseher gespeichert."
                 }
@@ -1222,9 +1260,9 @@ class MainActivity : ComponentActivity() {
                 )
             },
             onCalendarHiddenTitlesUpdated = { updated ->
+                val parsed = parseCalendarTitleList(updated)
+                prefs.edit().putString("calendar_phone_hidden_titles", updated).apply()
                 runOnUiThread {
-                    val parsed = parseCalendarTitleList(updated)
-                    prefs.edit().putString("calendar_phone_hidden_titles", updated).apply()
                     phoneHiddenCalendarTitles = parsed
                     uploadStatus = "Kalenderauswahl auf dem Fernseher gespeichert."
                     logRemote("calendar hidden-title update applied count=${parsed.size}")
@@ -1386,7 +1424,7 @@ private fun PlaybackView(
     onPause: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onResume: () -> Unit,
     onAddImages: () -> Unit, onAddFiles: () -> Unit, onCycleSpeed: (Int) -> Unit, onCycleMotionDuration: (Int) -> Unit,
     onCycleTransition: (Int) -> Unit, onCycleScale: (Int) -> Unit, onToggleShuffle: () -> Unit, onOpenUploadQr: () -> Unit, onCycleSleepTimer: (Int) -> Unit,
-    onSleepNow: () -> Unit, onExit: () -> Unit
+    onHidePhoto: () -> Unit, onSleepNow: () -> Unit, onExit: () -> Unit
 ) {
     BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
         var controlsVisible by remember { mutableStateOf(true) }
@@ -1415,6 +1453,7 @@ private fun PlaybackView(
                             "Fortsetzen" to "Weiterblättern",
                             "Jetzt schlafen" to "Bildschirm wird schwarz; OK oder Zurück weckt auf",
                             "Shuffle · ${if (shuffle) "An" else "Aus"}" to "Zufällig; neue Bilder bekommen Vorrang",
+                            "Dieses Bild ausblenden" to "Später unter Bilder verwalten wieder einblenden",
                             "Bilder per QR hinzufügen" to "Handy-Upload im WLAN",
                             "Dateien hinzufügen" to "Bilder auf diesem Gerät wählen",
                             "Bilddauer · ${seconds}s" to "Links/rechts ändert die Dauer",
@@ -1437,14 +1476,15 @@ private fun PlaybackView(
                                         0 -> onResume()
                                         1 -> onSleepNow()
                                         2 -> onToggleShuffle()
-                                        3 -> onAddImages()
-                                        4 -> onAddFiles()
-                                        5 -> onCycleSpeed(1)
-                                        6 -> onCycleMotionDuration(1)
-                                        7 -> onCycleTransition(1)
-                                        8 -> onCycleScale(1)
-                                        10 -> onCycleSleepTimer(1)
-                                        11 -> onExit()
+                                        3 -> onHidePhoto()
+                                        4 -> onAddImages()
+                                        5 -> onAddFiles()
+                                        6 -> onCycleSpeed(1)
+                                        7 -> onCycleMotionDuration(1)
+                                        8 -> onCycleTransition(1)
+                                        9 -> onCycleScale(1)
+                                        11 -> onCycleSleepTimer(1)
+                                        12 -> onExit()
                                     }
                                 }
                             ) {
@@ -1687,7 +1727,7 @@ private fun transitionDurationMillis(style: String) = when (style) { "cut" -> 0;
 private fun imageScaleName(mode: String) = when (mode) { "fill" -> "Füllen"; "stretch" -> "Strecken"; "ken_burns" -> "Zoom & Schwenk"; else -> "Einpassen" }
 private fun selectedAlbumLabel(images: List<String>, index: Int) = images.getOrNull(index)?.contains("upload-albums") == true
 
-private data class PhotoHistory(val addedAt: Long, val viewCount: Int, val lastViewedAt: Long)
+internal data class PhotoHistory(val addedAt: Long, val viewCount: Int, val lastViewedAt: Long)
 
 private data class PhoneNote(val text: String)
 private data class PhoneTodo(val text: String, val done: Boolean)
@@ -1745,7 +1785,7 @@ private fun serializeCalendarSnapshot(events: List<CalendarEvent>, hiddenTitles:
         .toString()
 }
 
-private fun loadPhotoHistory(raw: String?): Map<String, PhotoHistory> = runCatching {
+internal fun loadPhotoHistory(raw: String?): Map<String, PhotoHistory> = runCatching {
     val root = JSONObject(raw ?: "{}")
     buildMap {
         root.keys().forEach { key ->
@@ -1755,11 +1795,11 @@ private fun loadPhotoHistory(raw: String?): Map<String, PhotoHistory> = runCatch
     }
 }.getOrDefault(emptyMap())
 
-private fun savePhotoHistory(history: Map<String, PhotoHistory>): String = JSONObject().apply {
+internal fun savePhotoHistory(history: Map<String, PhotoHistory>): String = JSONObject().apply {
     history.forEach { (key, value) -> put(key, JSONObject().put("addedAt", value.addedAt).put("viewCount", value.viewCount).put("lastViewedAt", value.lastViewedAt)) }
 }.toString()
 
-private fun writeAtomicFile(atomicFile: AtomicFile, contents: String) {
+internal fun writeAtomicFile(atomicFile: AtomicFile, contents: String) {
     val stream = atomicFile.startWrite()
     try {
         stream.write(contents.toByteArray(Charsets.UTF_8))

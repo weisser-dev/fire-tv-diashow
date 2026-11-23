@@ -15,11 +15,19 @@ Eine leichte Diashow für Android TV und Fire TV. Sie ist für Fernseher gedacht
 - **Ältere Fire TVs:** Mindestversion Android API 22 (Fire OS 5), inklusive klassischer APK-Signatur.
 - **Demo:** [Interaktive Vorschau](https://weisser-dev.github.io/fire-tv-diashow/) als 9:16-TV-Mockup mit der aktuellen Wiedergabeoberfläche, echten Fire-TV-Aufnahmen ohne Personen, Fernbedienungsnavigation, Bildformat, Ken-Burns-Bewegung, Vorladen, bildbasiertem Ausblend-Übergang ohne Schwarzblende, intelligentem Shuffle, Schlafzustand, Uhr/Datum/Wetter, Kalender, Aufgaben, Notizen und QR-Telefonsteuerung. Die Demo zeigt „Optimized for Fire TV“ und lädt keine Dateien hoch.
 
+## Rahmen umziehen und Fotos ausblenden
+
+Scanne den QR-Code des bisherigen Rahmens und wähle **Sicherung herunterladen**. Öffne auf dem Handy anschließend die QR-Seite des zweiten Rahmens, wähle die ZIP-Datei und bestätige **Rahmen wiederherstellen**. Sie ersetzt die Sammlung auf dem Zielgerät. Während des Imports benötigt der Stick zusätzlich Platz für die entpackten Bilder.
+
+Die Sicherung enthält Originaldateien, Upload-Alben, ausgeblendete Bilder, Shuffle-Verlauf, Kalenderadresse und Filter, Aufgaben, Notizen und Anzeigeeinstellungen. Über den Android-Dateidialog ausgewählte Bilder werden auf dem Zielgerät in ein eigenes Album **Dateien** kopiert. Die ZIP-Datei enthält persönliche Daten im Klartext. Eine eingerichtete PIN gilt auf dem jeweiligen Gerät.
+
+Drücke während der Wiedergabe die mittlere Taste und wähle **Dieses Bild ausblenden**. Das Bild bleibt im Album. Unter **Bilder verwalten** kannst du ausgeblendete Bilder markieren und **Auswahl wieder einblenden** wählen.
+
 ## Handy-Upload und lokale Alben
 
 Wähle **Handy-Upload**, scanne den QR-Code und öffne die angezeigte Seite auf einem Smartphone im selben WLAN. Dort kannst du einen Albumname und mehrere Bilder angeben. Nur Bilder mit einer Kante über 1920 Pixel werden im Browser proportional verkleinert und als JPEG komprimiert. Bereits passende Fotos bleiben unverändert, damit sie nicht unnötig an Qualität verlieren. In der App lassen sich Upload-Alben filtern und einzelne Bilder löschen.
 
-Der Upload-Server läuft nur, solange sein QR-Dialog offen ist. Der zufällige Link gilt für diese Sitzung; Uploads sind auf lokale Netzwerkadressen beschränkt und pro Datei auf 50 MB begrenzt. Entwickleroptionen sind nicht erforderlich. Ein optionaler vierstelliger PIN ist für den Handy-Upload vorgesehen.
+Der Upload-Server ist über den QR-Code erreichbar, solange die App läuft. Der zufällige Link gilt für diese Sitzung; Uploads sind auf lokale Netzwerkadressen beschränkt und pro Datei auf 50 MB begrenzt. Entwickleroptionen sind nicht erforderlich. Ein optionaler vierstelliger PIN ist für den Handy-Upload vorgesehen.
 
 ## Bauen und installieren
 

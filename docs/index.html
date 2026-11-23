@@ -31,7 +31,7 @@
                 <div class="top-hud"><div class="clock-chip" id="clock"></div><div class="date-chip"><div class="date-info"><span id="date"></span><span class="weather-line" id="weatherLine"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6.5 19a4.5 4.5 0 0 1-.4-9A6.5 6.5 0 0 1 18.7 8a4 4 0 0 1-.2 8H6.5Z"/></svg><span id="weatherText"></span></span></div><button class="qr-badge" id="qrBadge" aria-label="Open phone demo" title="Open the phone-management demo"><svg viewBox="0 0 29 29" aria-hidden="true"><path d="M1 1h9v9H1zm2 2v5h5V3zm3 1h1v3H6zM19 1h9v9h-9zm2 2v5h5V3zm3 1h1v3h-1zM1 19h9v9H1zm2 2v5h5v-5zm3 1h1v3H6zM13 1h2v2h-2zm-2 4h3v2h-3zm3 3h3v2h-3zm-3 3h2v2h-2zm4 0h3v2h-3zm4 0h2v2h-2zm3 0h2v2h-2zm-11 3h3v2h-3zm4 1h2v3h-2zm3-2h2v2h-2zm3 3h2v2h-2zm4-4h2v3h-2zm-17 1h2v2h-2zm3 3h2v2h-2zm-3 3h3v2h-3zm4 2h2v2h-2zm3 2h2v3h-2zm3-2h3v2h-3zm4 3h2v2h-2zm3-4h2v3h-2z"/></svg></button></div></div>
                 <div class="agenda-overlay" id="agendaOverlay"><div class="agenda-col"><div class="agenda-heading">UPCOMING</div><div id="calendarRows"></div></div><div class="agenda-col"><div class="agenda-heading">TASKS</div><div id="todoRows"></div><div class="agenda-heading" style="margin-top:1.5cqw">NOTES</div><div id="noteRows"></div></div></div>
                 <div class="playback-controls" id="playbackControls"><button id="screenPrev" aria-label="Previous photo">|◀</button><button id="screenPause" class="pause-symbol" aria-label="Resume slideshow">▶</button><button id="screenNext" aria-label="Next photo">▶|</button><span class="screen-count" id="screenCount">1 / 5</span></div>
-                <div class="pause-menu" id="pauseMenu" hidden><div class="pause-card"><h3>Slideshow paused</h3><button class="pause-option active" data-action="resume">Resume <span>›</span></button><button class="pause-option" data-action="sleep">Sleep now <span>☾</span></button><button class="pause-option" data-action="shuffle">Shuffle · Off <span>↔</span></button><button class="pause-option" data-action="phone">Add photos / phone controls <span>▦</span></button><button class="pause-option" data-action="transition">Transition · Fade <span>›</span></button><button class="pause-option" data-action="fit">Image fit · Ken Burns <span>›</span></button></div></div>
+                <div class="pause-menu" id="pauseMenu" hidden><div class="pause-card"><h3>Slideshow paused</h3><button class="pause-option active" data-action="resume">Resume <span>›</span></button><button class="pause-option" data-action="sleep">Sleep now <span>☾</span></button><button class="pause-option" data-action="shuffle">Shuffle · Off <span>↔</span></button><button class="pause-option" data-action="hide">Hide this photo <span>›</span></button><button class="pause-option" data-action="phone">Add photos / phone controls <span>▦</span></button><button class="pause-option" data-action="transition">Transition · Fade <span>›</span></button><button class="pause-option" data-action="fit">Image fit · Ken Burns <span>›</span></button></div></div>
                 <div class="sleep-overlay" id="sleepOverlay" hidden><button class="sleep-qr" id="sleepQr" aria-label="Open phone demo" title="Open the phone-management demo"><svg viewBox="0 0 29 29" aria-hidden="true"><path d="M1 1h9v9H1zm2 2v5h5V3zm3 1h1v3H6zM19 1h9v9h-9zm2 2v5h5V3zm3 1h1v3h-1zM1 19h9v9H1zm2 2v5h5v-5zm3 1h1v3H6zM13 1h2v2h-2zm-2 4h3v2h-3zm3 3h3v2h-3zm-3 3h2v2h-2zm4 0h3v2h-3zm4 0h2v2h-2zm3 0h2v2h-2zm-11 3h3v2h-3zm4 1h2v3h-2zm3-2h2v2h-2zm3 3h2v2h-2zm4-4h2v3h-2zm-17 1h2v2h-2zm3 3h2v2h-2zm-3 3h3v2h-3zm4 2h2v2h-2zm3 2h2v3h-2zm3-2h3v2h-3zm4 3h2v2h-2zm3-4h2v3h-2z"/></svg></button><div class="sleep-clock" id="sleepClock"></div><div class="sleep-date" id="sleepDate"></div><div class="sleep-weather" id="sleepWeather"></div><div class="sleep-agenda"><div><div class="agenda-heading">UPCOMING</div><div id="sleepCalendarRows"></div></div><div><div class="agenda-heading">TASKS & NOTES</div><div id="sleepTodoRows"></div><div id="sleepNoteRows"></div></div></div></div>
               </div>
             </div>
@@ -39,7 +39,9 @@
           <div class="controls"><button class="iconbtn" id="prev" aria-label="Previous photo">‹</button><button class="iconbtn play" id="play">▶ Play</button><button class="iconbtn" id="next" aria-label="Next photo">›</button><span id="count" class="caption">1 / 5</span></div>
           <div class="thumbs" id="thumbs" aria-label="Choose a demo photo"></div><div class="caption" id="caption">Coast at sunset</div>
           <button class="iconbtn" id="phoneDemoToggle">▦ Open phone-management demo</button>
-          <div class="phone-panel" id="phonePanel" hidden><h3>Phone management · demo</h3><p>Tap an eye to hide or show every upcoming event with that title. This demo stores the choice in this browser only.</p><div id="phoneSeries"></div><p class="caption">Photo upload is disabled on GitHub Pages. On the TV, this page is available from the QR code while Stillframe is running.</p></div>
+          <div class="phone-panel" id="phonePanel" hidden><h3>Phone management · demo</h3><p>Tap an eye to hide or show every upcoming event with that title. This demo stores the choice in this browser only.</p><div id="phoneSeries"></div><h4>Hidden photos</h4><div id="hiddenPhotoList"></div>
+            <h4>Frame backup</h4><p>Try saving and restoring this demo in your browser. On the Fire TV, the QR page transfers your photos and settings in a ZIP file.</p>
+            <button class="iconbtn" id="saveDemo">Save demo backup</button> <button class="iconbtn" id="restoreDemo">Restore demo backup</button><p aria-live="polite" id="backupStatus"></p><p class="caption">Photo upload is disabled on GitHub Pages. On the TV, this page is available from the QR code while Stillframe is running.</p></div>
         </div>
 
         <div class="settings">
@@ -89,6 +91,16 @@
   const notes = ['Erinnerungen', 'Nächsten Urlaub planen'];
   let index = 0, timer = null, sleeping = false, paused = false, shuffle = false;
   let sleepTimeout = null, controlsHideTimer = null, transitionBusy = false, queuedImage = null, queuedIndex = -1, motionRequired = false;
+  const hiddenPhotoKey = 'stillframe-demo-hidden-photos';
+  let hiddenPhotos = new Set(JSON.parse(localStorage.getItem(hiddenPhotoKey) || '[]'));
+  const visibleIndices = () => items.map((_, i) => i).filter(i => !hiddenPhotos.has(i));
+  function nextVisible(direction) {
+    for (let step = 1; step <= items.length; step++) {
+      const i = (index + direction * step + items.length) % items.length;
+      if (!hiddenPhotos.has(i)) return i;
+    }
+    return index;
+  }
   const countsKey = 'stillframe-demo-counts';
   const hiddenKey = 'stillframe-demo-hidden-series';
   const storedCounts = JSON.parse(localStorage.getItem(countsKey) || '[1,0,0,0,0]');
@@ -261,18 +273,21 @@
     document.querySelector('#currentDuration').textContent = seconds + ' sec';
   }
   function updatePhotoLabels() {
-    document.querySelector('#count').textContent = (index + 1) + ' / ' + items.length;
-    document.querySelector('#screenCount').textContent = (index + 1) + ' / ' + items.length;
-    document.querySelector('#caption').textContent = items[index][1];
+    const visible = visibleIndices();
+    const count = (visible.indexOf(index) + 1) + ' / ' + visible.length;
+    document.querySelector('#count').textContent = count;
+    document.querySelector('#screenCount').textContent = count;
+    document.querySelector('#caption').textContent = visible.length ? items[index][1] : 'All photos are hidden. Open phone management to show a photo.';
     document.querySelectorAll('.thumb').forEach((button, i) => button.classList.toggle('active', i === index));
     renderAgenda();
   }
   function preloadNext() {
-    const target = shuffle ? chooseShuffleIndex() : (index + 1) % items.length;
+    const target = shuffle ? chooseShuffleIndex() : nextVisible(1);
     queuePhoto(target);
   }
   function chooseShuffleIndex() {
-    const pool = viewCounts.map((count, i) => ({ count, i })).filter(item => item.i !== index);
+    const pool = viewCounts.map((count, i) => ({ count, i })).filter(item => item.i !== index && !hiddenPhotos.has(item.i));
+    if (!pool.length) return index;
     const least = Math.min(...pool.map(item => item.count));
     const eligible = pool.filter(item => item.count <= least + 3);
     const weighted = eligible.flatMap(item => Array(Math.max(1, 4 - (item.count - least))).fill(item.i));
@@ -343,6 +358,7 @@
     if (play.dataset.playing === 'true') controlsHideTimer = setTimeout(() => frame.classList.add('controls-hidden'), 2800);
   }
   function setPlaying(value) {
+    if (value && !visibleIndices().length) return;
     if (transitionBusy) return;
     if (value) {
       sleeping = false;
@@ -379,7 +395,7 @@
   }
   function restart() {
     clearInterval(timer);
-    if (play.dataset.playing === 'true') timer = setTimeout(() => show(shuffle ? queuedIndex : (index + 1) % items.length), slideDurationMs());
+    if (play.dataset.playing === 'true') timer = setTimeout(() => show(shuffle ? queuedIndex : nextVisible(1)), slideDurationMs());
   }
   function sleep() {
     sleeping = true;
@@ -469,6 +485,62 @@
     button.onclick = () => show(i);
     document.querySelector('#thumbs').append(button);
   });
+  function refreshLibrary() {
+    localStorage.setItem(hiddenPhotoKey, JSON.stringify([...hiddenPhotos]));
+    const visible = visibleIndices();
+    const list = document.querySelector('#hiddenPhotoList');
+    list.replaceChildren();
+    for (const i of hiddenPhotos) {
+      const button = document.createElement('button');
+      button.className = 'iconbtn';
+      button.textContent = 'Show ' + items[i][1];
+      button.onclick = () => { hiddenPhotos.delete(i); refreshLibrary(); };
+      list.append(button);
+    }
+    if (!list.children.length) list.textContent = 'No hidden photos.';
+    document.querySelectorAll('.thumb').forEach((button, i) => { button.hidden = hiddenPhotos.has(i); });
+    photoStage.style.visibility = visible.length ? '' : 'hidden';
+    if (!visible.length) {
+      setPlaying(false);
+      document.querySelector('#pauseMenu').hidden = true;
+    } else if (hiddenPhotos.has(index)) {
+      index = nextVisible(1);
+      photo.src = 'demo/' + items[index][0];
+      photo.alt = items[index][2];
+    }
+    updatePhotoLabels();
+    preloadNext();
+  }
+  const demoBackupKey = 'stillframe-demo-backup-v1';
+  const backupControls = [...document.querySelectorAll('.stage input, .stage select')].filter(el => el.id);
+  const restoreDemo = document.querySelector('#restoreDemo');
+  restoreDemo.disabled = !localStorage.getItem(demoBackupKey);
+  document.querySelector('#saveDemo').onclick = () => {
+    const controls = backupControls.map(el => [el.id, el.type === 'checkbox' ? el.checked : el.value]);
+    localStorage.setItem(demoBackupKey, JSON.stringify({ hiddenPhotos: [...hiddenPhotos], hiddenSeries: [...hiddenSeries], viewCounts, controls, shuffle }));
+    restoreDemo.disabled = false;
+    document.querySelector('#backupStatus').textContent = 'Demo backup saved in this browser.';
+  };
+  restoreDemo.onclick = () => {
+    if (transitionBusy) return;
+    const saved = JSON.parse(localStorage.getItem(demoBackupKey));
+    if (!saved) return;
+    hiddenPhotos = new Set(saved.hiddenPhotos);
+    hiddenSeries = new Set(saved.hiddenSeries);
+    localStorage.setItem(hiddenKey, JSON.stringify(saved.hiddenSeries));
+    viewCounts.splice(0, viewCounts.length, ...saved.viewCounts);
+    localStorage.setItem(countsKey, JSON.stringify(viewCounts));
+    for (const [id, value] of saved.controls) {
+      const el = document.getElementById(id);
+      if (el.type === 'checkbox') el.checked = value; else el.value = value;
+      el.dispatchEvent(new Event(el.type === 'range' ? 'input' : 'change'));
+    }
+    if (shuffle !== saved.shuffle) toggleShuffle();
+    refreshLibrary();
+    renderPhoneSeries();
+    document.querySelector('#backupStatus').textContent = 'Demo backup restored.';
+  };
+  refreshLibrary();
   const onPhotoLoad = event => {
     if (event.currentTarget !== photo) return;
     photo.style.animationPlayState = 'paused';
@@ -478,10 +550,10 @@
   };
   photo.addEventListener('load', onPhotoLoad);
   nextPhoto.addEventListener('load', onPhotoLoad);
-  document.querySelector('#prev').onclick = () => show(index - 1);
-  document.querySelector('#next').onclick = () => show(index + 1);
-  document.querySelector('#screenPrev').onclick = () => show(index - 1);
-  document.querySelector('#screenNext').onclick = () => show(index + 1);
+  document.querySelector('#prev').onclick = () => show(nextVisible(-1));
+  document.querySelector('#next').onclick = () => show(nextVisible(1));
+  document.querySelector('#screenPrev').onclick = () => show(nextVisible(-1));
+  document.querySelector('#screenNext').onclick = () => show(nextVisible(1));
   document.querySelector('#screenPause').onclick = () => setPlaying(play.dataset.playing !== 'true');
   document.querySelector('#play').onclick = () => setPlaying(play.dataset.playing !== 'true');
   document.querySelector('#shuffleToggle').onclick = toggleShuffle;
@@ -537,6 +609,13 @@
     if (action === 'resume') setPlaying(true);
     else if (action === 'sleep') sleep();
     else if (action === 'shuffle') toggleShuffle();
+    else if (action === 'hide') {
+      if (transitionBusy) return;
+      hiddenPhotos.add(index);
+      refreshLibrary();
+      if (visibleIndices().length) setPlaying(true);
+      else document.querySelector('#pauseMenu').hidden = true;
+    }
     else if (action === 'phone') { openPhoneDemo(); document.querySelector('#pauseMenu').hidden = true; }
     else if (action === 'transition') selectOption('transition');
     else if (action === 'fit') selectOption('fit');
@@ -562,8 +641,8 @@
       }
       return;
     }
-    if (event.key === 'ArrowRight') { event.preventDefault(); show(index + 1); }
-    else if (event.key === 'ArrowLeft') { event.preventDefault(); show(index - 1); }
+    if (event.key === 'ArrowRight') { event.preventDefault(); show(nextVisible(1)); }
+    else if (event.key === 'ArrowLeft') { event.preventDefault(); show(nextVisible(-1)); }
     else if (event.key === 'ArrowUp') { event.preventDefault(); setPlaying(false); }
     else if ((event.key === ' ' || event.key === 'Enter') && !event.target.matches('button,input,select,textarea')) {
       event.preventDefault();

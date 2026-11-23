@@ -5,6 +5,7 @@ import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.OutputStream
 import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.NetworkInterface
@@ -18,8 +19,10 @@ import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** A temporary, token-protected LAN upload page for photos sent from a phone browser. */
-class LocalPhotoUploadServer(
+internal class LocalPhotoUploadServer(
     private val filesDir: File,
+    private val backup: FrameBackup,
+    private val onRestored: () -> Unit,
     private val onPhotoUploaded: (File, String) -> Unit,
     private val readPhoneContent: () -> String,
     private val onPhoneContentUpdated: (String) -> Unit,
@@ -50,7 +53,7 @@ class LocalPhotoUploadServer(
         acceptThread = Thread({
             while (running.get()) {
                 val socket = runCatching { listener.accept() }.getOrNull() ?: break
-                Thread({ handle(socket) }, "photo-carousel-upload-request").apply { isDaemon = true; start() }
+                Thread({ try { handle(socket) } catch (_: java.io.IOException) { socket.close() } }, "photo-carousel-upload-request").apply { isDaemon = true; start() }
             }
         }, "photo-carousel-upload-server").apply { isDaemon = true; start() }
         return "http://$ip:${listener.localPort}/upload/$token"
@@ -83,13 +86,52 @@ class LocalPhotoUploadServer(
                 val separator = header.indexOf(':')
                 if (separator > 0) headers[header.substring(0, separator).trim().lowercase(Locale.ROOT)] = header.substring(separator + 1).trim()
             }
-            when {
-                method == "GET" && rawPath == "/upload/$token" -> respond(client, 200, "text/html; charset=utf-8", uploadPage(readPhoneContent()))
-                method == "GET" && rawPath == "/api/calendar/$token" -> respond(client, 200, "application/json; charset=utf-8", readCalendarState())
-                method == "POST" && rawPath == "/api/upload/$token" -> receivePhoto(client, input, headers, query)
-                method == "POST" && rawPath == "/api/content/$token" -> receivePhoneContent(client, input, headers)
-                method == "POST" && rawPath == "/api/calendar/$token" -> receiveCalendarState(client, input, headers)
-                else -> respond(client, 404, "text/plain; charset=utf-8", "Nicht gefunden.")
+            synchronized(FrameBackup.libraryLock) {
+                if (!running.get()) return
+                when {
+                    method == "POST" && rawPath == "/api/backup/$token" -> {
+                        val size = headers["content-length"]?.toIntOrNull()
+                        if (size == null || size !in 0..64) { respond(client, 400, "text/plain", "Formular ungültig."); return }
+                        val body = ByteArray(size)
+                        java.io.DataInputStream(input).readFully(body)
+                        val supplied = parseQuery(String(body, Charsets.UTF_8))["pin"].orEmpty()
+                        if (backup.pin().let { it.isNotEmpty() && it != supplied }) {
+                            respond(client, 403, "text/plain; charset=utf-8", "Die TV-PIN stimmt nicht."); return
+                        }
+                        val out = client.getOutputStream()
+                        out.write(("HTTP/1.1 200 OK\r\nContent-Type: application/zip\r\n" +
+                            "Content-Disposition: attachment; filename=stillframe-backup.zip\r\n" +
+                            "Transfer-Encoding: chunked\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n").toByteArray(Charsets.US_ASCII))
+                        val download = ChunkedDownload(out)
+                        try {
+                            backup.export(download)
+                            download.finish()
+                        } catch (_: Exception) {
+                            // Closing without the last HTTP chunk tells the browser the download failed.
+                            return
+                        }
+                    }
+                    method == "POST" && rawPath == "/api/restore/$token" -> {
+                        if (headers["x-stillframe-restore"] != "replace" || backup.pin().let { it.isNotEmpty() && it != headers["x-stillframe-pin"] }) {
+                            respond(client, 403, "text/plain; charset=utf-8", "Bestätigung oder TV-PIN fehlt."); return
+                        }
+                        try {
+                            backup.restore(input, headers["content-length"]?.toLongOrNull() ?: 0)
+                        } catch (e: Exception) {
+                            respond(client, 400, "text/plain; charset=utf-8", e.localizedMessage?.takeIf { it.isNotBlank() } ?: "Ungültige Sicherung.")
+                            return
+                        }
+                        stop()
+                        try { respond(client, 200, "text/plain; charset=utf-8", "Rahmen wiederhergestellt. Für weitere Änderungen den neuen QR-Code scannen.") }
+                        finally { onRestored() }
+                    }
+                    method == "GET" && rawPath == "/upload/$token" -> respond(client, 200, "text/html; charset=utf-8", uploadPage(readPhoneContent()))
+                    method == "GET" && rawPath == "/api/calendar/$token" -> respond(client, 200, "application/json; charset=utf-8", readCalendarState())
+                    method == "POST" && rawPath == "/api/upload/$token" -> receivePhoto(client, input, headers, query)
+                    method == "POST" && rawPath == "/api/content/$token" -> receivePhoneContent(client, input, headers)
+                    method == "POST" && rawPath == "/api/calendar/$token" -> receiveCalendarState(client, input, headers)
+                    else -> respond(client, 404, "text/plain; charset=utf-8", "Nicht gefunden.")
+                }
             }
         }
     }
@@ -238,8 +280,28 @@ class LocalPhotoUploadServer(
         <p class="note">Standardmäßig bleiben Originale unverändert. Wenn aktiviert, werden Bilder über 1920 Pixel Kantenlänge proportional verkleinert und als JPEG gespeichert.</p>
         <label for="photos">Bilder auswählen</label><input id="photos" type="file" accept="image/*" multiple>
         <button id="send">Ausgewählte Bilder hochladen</button><p class="status" id="status">Der Upload funktioniert, solange Stillframe auf dem Fernseher läuft.</p>
+        <section><h2>Rahmen sichern und wiederherstellen</h2>
+        <p>Die ZIP-Datei enthält Fotos, Alben, Einstellungen, Kalenderadresse, Aufgaben, Notizen und den Shuffle-Verlauf. Bewahre sie privat auf.</p>
+        <form method="post" action="/api/backup/$token">
+        ${if (backup.pin().isEmpty()) "" else "<label for='backup-pin'>TV-PIN</label>"}
+        <input ${if (backup.pin().isEmpty()) "type='hidden'" else "type='password'"} id="backup-pin" name="pin" maxlength="4" inputmode="numeric" autocomplete="off">
+        <button type="submit">Sicherung herunterladen</button></form>
+        <label for="archive">Sicherung zum Einspielen auswählen</label><input id="archive" type="file" accept=".zip,application/zip">
+        <button type="button" id="restore" disabled>Rahmen wiederherstellen</button><p class="status" id="restore-status" aria-live="polite"></p></section>
         <p class="note">Der persönliche Link funktioniert nur im selben WLAN, solange Stillframe auf dem Fernseher läuft. Keine Google-Anmeldung erforderlich.</p></main>
         <script>
+        const archive=document.getElementById('archive'),restore=document.getElementById('restore'),restoreStatus=document.getElementById('restore-status');
+        archive.onchange=()=>{restore.disabled=!archive.files.length};
+        restore.onclick=async()=>{
+          const file=archive.files[0];
+          if(!file||!confirm('Fotos, Alben, Notizen, Aufgaben und Einstellungen auf diesem Fernseher durch die Sicherung ersetzen?'))return;
+          restore.disabled=true;archive.disabled=true;restoreStatus.textContent='Sicherung wird übertragen und geprüft …';
+          try{
+            const response=await fetch('/api/restore/$token',{method:'POST',headers:{'Content-Type':'application/zip','X-Stillframe-Restore':'replace','X-Stillframe-Pin':document.getElementById('backup-pin').value},body:file});
+            const message=await response.text();if(!response.ok)throw Error(message||'Wiederherstellung fehlgeschlagen.');
+            restoreStatus.textContent=message;
+          }catch(error){restoreStatus.textContent=error.message||'Verbindung unterbrochen.';restore.disabled=false;archive.disabled=false}
+        };
         const input=document.getElementById('photos'), album=document.getElementById('album'), newFolder=document.getElementById('new-folder'), newFolderWrap=document.getElementById('new-folder-wrap'), compress=document.getElementById('compress'), button=document.getElementById('send'), status=document.getElementById('status');
         const todoList=document.getElementById('todos'), noteList=document.getElementById('notes'), contentStatus=document.getElementById('content-status');
         const calendarList=document.getElementById('calendar-events'), calendarStatus=document.getElementById('calendar-status');let calendarState={events:[],hiddenTitles:[]},savingCalendar=false;
@@ -339,6 +401,22 @@ class LocalPhotoUploadServer(
                 }
             }.sortedByDescending { it.modifiedAt }
         }
+    }
+}
+
+private class ChunkedDownload(private val socket: OutputStream) : OutputStream() {
+    private val newline = "\r\n".toByteArray(Charsets.US_ASCII)
+    override fun write(value: Int) = write(byteArrayOf(value.toByte()))
+    override fun write(bytes: ByteArray, offset: Int, length: Int) {
+        if (length == 0) return
+        socket.write(length.toString(16).toByteArray(Charsets.US_ASCII))
+        socket.write(newline)
+        socket.write(bytes, offset, length)
+        socket.write(newline)
+    }
+    fun finish() {
+        socket.write("0\r\n\r\n".toByteArray(Charsets.US_ASCII))
+        socket.flush()
     }
 }
 
