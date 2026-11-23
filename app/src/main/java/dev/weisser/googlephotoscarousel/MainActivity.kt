@@ -59,6 +59,7 @@ import coil.compose.AsyncImage
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -173,7 +174,6 @@ class MainActivity : ComponentActivity() {
             var motionSeconds by remember { mutableIntStateOf(prefs.getInt("motion_seconds", 30)) }
             var shuffle by remember { mutableStateOf(prefs.getBoolean("shuffle", false)) }
             var photoHistory by remember { mutableStateOf<Map<String, PhotoHistory>>(emptyMap()) }
-            val latestPhotoHistory by rememberUpdatedState(photoHistory)
             var photoHistoryLoaded by remember { mutableStateOf(false) }
             var lastRecordedSlide by remember { mutableStateOf<String?>(null) }
             var failedPreloadPhotos by remember { mutableStateOf<Set<String>>(emptySet()) }
@@ -183,7 +183,7 @@ class MainActivity : ComponentActivity() {
             var autoStartOnBoot by remember { mutableStateOf(prefs.getBoolean("auto_start_on_boot", true)) }
             var playing by remember { mutableStateOf(false) }
             var index by remember { mutableIntStateOf(0) }
-            var currentImageNeedsMotion by remember(index) { mutableStateOf(false) }
+            var currentImageNeedsMotion by remember { mutableStateOf(false) }
             var showSettings by remember { mutableStateOf(false) }
             var showPhotoManager by remember { mutableStateOf(false) }
             var confirmDeleteSelected by remember { mutableStateOf(false) }
@@ -291,11 +291,30 @@ class MainActivity : ComponentActivity() {
                 if (selectedUploadAlbum != "*") selectedUploads.map { "file:${it.path}" }
                 else (localPhotos.map { "uri:$it" } + selectedUploads.map { "file:${it.path}" }).distinct()
             }
-            val nextSlideIndex = remember(images, index, shuffle, photoHistory, failedPreloadPhotos) {
-                chooseNextImage(images, photoHistory, index, shuffle, failedPreloadPhotos)
+            var nextSlideIndex by remember(images, index, shuffle, failedPreloadPhotos) { mutableIntStateOf(-1) }
+            LaunchedEffect(images, index, playing, shuffle, failedPreloadPhotos, photoHistoryLoaded) {
+                if (!playing || images.isEmpty()) return@LaunchedEffect
+                // Let the promoted photo start moving before filling the free slot.
+                // The just-displayed photo is excluded from the lottery, so recording its
+                // view does not require drawing a second random choice for the same slide.
+                delay(450)
+                val history = photoHistory
+                val excluded = failedPreloadPhotos
+                val current = index
+                val randomOrder = shuffle
+                nextSlideIndex = withContext(Dispatchers.Default) {
+                    chooseNextImage(images, history, current, randomOrder, excluded)
+                }
             }
             val transitionToSlide: (Int) -> Unit = { target ->
                 if (requestedSlide == null && target != index) requestedSlide = images.getOrNull(target)
+            }
+            var nextPressed by remember(images, index, playing, paused) { mutableStateOf(false) }
+            LaunchedEffect(nextPressed, nextSlideIndex) {
+                if (nextPressed && nextSlideIndex >= 0) {
+                    nextPressed = false
+                    transitionToSlide(nextSlideIndex)
+                }
             }
             LaunchedEffect(images, playing) {
                 if (!playing || requestedSlide !in images) requestedSlide = null
@@ -370,7 +389,7 @@ class MainActivity : ComponentActivity() {
                 val historyFile = File(filesDir, "photo-history.json")
                 while (true) {
                     delay(60_000)
-                    val snapshot = latestPhotoHistory
+                    val snapshot = photoHistory
                     val serialized = withContext(Dispatchers.Default) { savePhotoHistory(snapshot) }
                     withContext(Dispatchers.IO) { writeAtomicFile(AtomicFile(historyFile), serialized) }
                 }
@@ -736,7 +755,7 @@ class MainActivity : ComponentActivity() {
                         playing && images.isNotEmpty() -> { code ->
                             when {
                                 (portraitUi && code == KeyEvent.KEYCODE_DPAD_DOWN) || (!portraitUi && code == KeyEvent.KEYCODE_DPAD_RIGHT) || code == KeyEvent.KEYCODE_MEDIA_NEXT -> {
-                                    transitionToSlide(nextSlideIndex)
+                                    nextPressed = true
                                     true
                                 }
                                 (portraitUi && code == KeyEvent.KEYCODE_DPAD_UP) || (!portraitUi && code == KeyEvent.KEYCODE_DPAD_LEFT) || code == KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
@@ -755,11 +774,11 @@ class MainActivity : ComponentActivity() {
                     }
                     onDispose { remoteKeyHandler = null }
                 }
-                LaunchedEffect(images.size, index, nextSlideIndex, playing, paused, seconds, shuffle, panZoom, currentImageNeedsMotion, motionSeconds, requestedSlide) {
+                LaunchedEffect(images, index, playing, paused, seconds, shuffle, panZoom, currentImageNeedsMotion, motionSeconds, requestedSlide, failedPreloadPhotos) {
                     if (playing && !paused && images.size > 1 && requestedSlide == null) {
                         val slideSeconds = if (panZoom && currentImageNeedsMotion) maxOf(seconds, motionSeconds, 5) else maxOf(seconds, 5)
                         delay(slideSeconds * 1000L)
-                        transitionToSlide(nextSlideIndex)
+                        transitionToSlide(snapshotFlow { nextSlideIndex }.first { it >= 0 })
                     }
                 }
                 LaunchedEffect(playing, paused, sleeping, sleepTimerMinutes, sleepDeadline) {
@@ -828,10 +847,13 @@ class MainActivity : ComponentActivity() {
                         SleepScreen(showClock, showDate, weatherEnabled, weatherLabel, glassOverlay, if (calendarEnabled) visibleCalendarEvents else emptyList(), if (notesEnabled) phoneContent else PhoneContent(), uploadUrl) { startPhotoUpload() }
                     } else if (playing && images.isNotEmpty()) {
                         PlaybackView(images, index, nextSlideIndex, panZoom, seconds, motionSeconds, paused, imageScaleMode, imagePaddingDp, playbackControlsPulse, transitionStyle, pauseMenuIndex, shuffle, sleepTimerMinutes, requestedSlide,
-                            onTransitionComplete = { photo ->
+                            onTransitionComplete = { photo, motionRequired ->
                                 if (photo == requestedSlide) {
                                     val target = images.indexOf(photo)
-                                    if (target >= 0) index = target
+                                    if (target >= 0) {
+                                        currentImageNeedsMotion = motionRequired
+                                        index = target
+                                    }
                                     requestedSlide = null
                                 }
                             },
@@ -842,7 +864,7 @@ class MainActivity : ComponentActivity() {
                             },
                             onImageMotionRequired = { currentImageNeedsMotion = it },
                             onPause = { paused = true; pauseMenuIndex = 0 },
-                            onNext = { transitionToSlide(nextSlideIndex) }, onPrevious = { transitionToSlide((index - 1 + images.size) % images.size) },
+                            onNext = { nextPressed = true }, onPrevious = { transitionToSlide((index - 1 + images.size) % images.size) },
                             onResume = { paused = false }, onAddImages = { startPhotoUpload() }, onAddFiles = { launchPhotoChooser() },
                             onCycleSpeed = { direction -> seconds = (seconds + direction).coerceIn(5, 60); prefs.edit().putInt("seconds", seconds).apply() },
                             onCycleMotionDuration = { direction -> motionSeconds = cycleValue(motionSeconds, listOf(15, 30, 45, 60), direction); prefs.edit().putInt("motion_seconds", motionSeconds).apply() },
@@ -1357,7 +1379,7 @@ private fun EmptyState() {
 private fun PlaybackView(
     images: List<String>, index: Int, nextIndex: Int, panZoom: Boolean, seconds: Int, motionSeconds: Int,
     paused: Boolean, imageScaleMode: String, imagePaddingDp: Int, controlsPulse: Int, transitionStyle: String, pauseMenuIndex: Int, shuffle: Boolean, sleepTimerMinutes: Int,
-    requestedSlide: String?, onTransitionComplete: (String) -> Unit,
+    requestedSlide: String?, onTransitionComplete: (String, Boolean) -> Unit,
     showClock: Boolean, showDate: Boolean, showWeather: Boolean, weatherLabel: String, glassOverlay: Boolean, calendarEvents: List<CalendarEvent>, phoneContent: PhoneContent, uploadUrl: String?,
     onNextPreloadFailed: (String) -> Unit,
     onImageMotionRequired: (Boolean) -> Unit,
