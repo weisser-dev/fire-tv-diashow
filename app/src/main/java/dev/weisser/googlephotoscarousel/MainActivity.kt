@@ -14,20 +14,10 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
-import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.verticalScroll
@@ -63,21 +53,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.zIndex
 import androidx.lifecycle.lifecycleScope
 import androidx.core.content.FileProvider
 import coil.compose.AsyncImage
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.coroutines.flow.first
 import java.io.File
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -192,7 +176,6 @@ class MainActivity : ComponentActivity() {
             val latestPhotoHistory by rememberUpdatedState(photoHistory)
             var photoHistoryLoaded by remember { mutableStateOf(false) }
             var lastRecordedSlide by remember { mutableStateOf<String?>(null) }
-            var loadedNextPhoto by remember { mutableStateOf<String?>(null) }
             var failedPreloadPhotos by remember { mutableStateOf<Set<String>>(emptySet()) }
             var displayRotation by remember { mutableIntStateOf(prefs.getInt("display_rotation", 0)) }
             var orientationChosen by remember { mutableStateOf(prefs.contains("display_rotation")) }
@@ -283,8 +266,7 @@ class MainActivity : ComponentActivity() {
             val focusManager = LocalFocusManager.current
             val photoListState = rememberLazyListState()
             val uiScope = rememberCoroutineScope()
-            var slideTransitionJob by remember { mutableStateOf<Job?>(null) }
-            var transitionTargetIndex by remember { mutableIntStateOf(-1) }
+            var requestedSlide by remember { mutableStateOf<String?>(null) }
             val settingsFocusRequester = remember { FocusRequester() }
             val localSourceFocusRequester = remember { FocusRequester() }
             val uploadSourceFocusRequester = remember { FocusRequester() }
@@ -300,10 +282,11 @@ class MainActivity : ComponentActivity() {
             var settingsButtonFocused by remember { mutableStateOf(false) }
             var updateCheckFocused by remember { mutableStateOf(false) }
             var updateBannerFocused by remember { mutableStateOf(false) }
-            val uploadAlbums = uploadedPhotos.map { it.album }.distinct().sorted()
-            val selectedUploads = uploadedPhotos
-                .filter { selectedUploadAlbum == "*" || it.album == selectedUploadAlbum }
+            val uploadAlbums = remember(uploadedPhotos) { uploadedPhotos.map { it.album }.distinct().sorted() }
+            val selectedUploads = remember(uploadedPhotos, selectedUploadAlbum, newestUploadsFirst) {
+                uploadedPhotos.filter { selectedUploadAlbum == "*" || it.album == selectedUploadAlbum }
                 .let { if (newestUploadsFirst) it.sortedByDescending(UploadedPhoto::modifiedAt) else it.sortedBy(UploadedPhoto::modifiedAt) }
+            }
             val images = remember(localPhotos, selectedUploads, selectedUploadAlbum) {
                 if (selectedUploadAlbum != "*") selectedUploads.map { "file:${it.path}" }
                 else (localPhotos.map { "uri:$it" } + selectedUploads.map { "file:${it.path}" }).distinct()
@@ -311,21 +294,12 @@ class MainActivity : ComponentActivity() {
             val nextSlideIndex = remember(images, index, shuffle, photoHistory, failedPreloadPhotos) {
                 chooseNextImage(images, photoHistory, index, shuffle, failedPreloadPhotos)
             }
-            val nextSlideImageModel = images.getOrNull(nextSlideIndex)?.removePrefix("uri:")?.removePrefix("file:")
             val transitionToSlide: (Int) -> Unit = { target ->
-                if (target in images.indices && target != index) {
-                    slideTransitionJob?.cancel()
-                    transitionTargetIndex = target
-                    slideTransitionJob = uiScope.launch {
-                        val style = transitionStyle
-                        index = target
-                        if (style == "cut") {
-                            transitionTargetIndex = -1
-                        }
-                    }
-                }
+                if (requestedSlide == null && target != index) requestedSlide = images.getOrNull(target)
             }
-            LaunchedEffect(index, nextSlideIndex) { loadedNextPhoto = null }
+            LaunchedEffect(images, playing) {
+                if (!playing || requestedSlide !in images) requestedSlide = null
+            }
             val managerImages = remember(localPhotos, uploadedPhotos, managerAlbumFilter) {
                 val local = if (managerAlbumFilter == "*" || managerAlbumFilter == "__local__") localPhotos.map { "uri:$it" } else emptyList()
                 val uploads = uploadedPhotos.filter { managerAlbumFilter == "*" || it.album == managerAlbumFilter }.map { "file:${it.path}" }
@@ -373,7 +347,7 @@ class MainActivity : ComponentActivity() {
                 photoHistory = withContext(Dispatchers.Default) { loadPhotoHistory(savedHistory) }
                 photoHistoryLoaded = true
             }
-            LaunchedEffect(images.toList(), photoHistoryLoaded) {
+            LaunchedEffect(images, photoHistoryLoaded) {
                 if (!photoHistoryLoaded) return@LaunchedEffect
                 val now = System.currentTimeMillis()
                 val missing = images.filterNot(photoHistory::containsKey)
@@ -381,7 +355,7 @@ class MainActivity : ComponentActivity() {
                     photoHistory = photoHistory + missing.associateWith { PhotoHistory(now, 0, 0L) }
                 }
             }
-            LaunchedEffect(images.toList(), index, playing, photoHistoryLoaded) {
+            LaunchedEffect(images, index, playing, photoHistoryLoaded) {
                 if (!photoHistoryLoaded || !playing) return@LaunchedEffect
                 val model = images.getOrNull(index) ?: return@LaunchedEffect
                 val slideKey = "$index:$model"
@@ -781,21 +755,10 @@ class MainActivity : ComponentActivity() {
                     }
                     onDispose { remoteKeyHandler = null }
                 }
-                LaunchedEffect(images.size, index, nextSlideIndex, playing, paused, seconds, shuffle, panZoom, currentImageNeedsMotion, motionSeconds, loadedNextPhoto, transitionTargetIndex) {
-                    if (playing && !paused && images.size > 1 && transitionTargetIndex < 0) {
+                LaunchedEffect(images.size, index, nextSlideIndex, playing, paused, seconds, shuffle, panZoom, currentImageNeedsMotion, motionSeconds, requestedSlide) {
+                    if (playing && !paused && images.size > 1 && requestedSlide == null) {
                         val slideSeconds = if (panZoom && currentImageNeedsMotion) maxOf(seconds, motionSeconds, 5) else maxOf(seconds, 5)
                         delay(slideSeconds * 1000L)
-                        val targetModel = nextSlideImageModel
-                        if (targetModel != null && targetModel != images[index].removePrefix("uri:").removePrefix("file:")) {
-                            val ready = withTimeoutOrNull(5_000L) {
-                                snapshotFlow { loadedNextPhoto }.first { it == targetModel }
-                                true
-                            } ?: false
-                            // If decoding failed or timed out, keep the current image visible as
-                            // the fallback. The failed item is excluded and the next candidate
-                            // is preloaded before the current slide is allowed to advance.
-                            if (!ready) return@LaunchedEffect
-                        }
                         transitionToSlide(nextSlideIndex)
                     }
                 }
@@ -811,9 +774,6 @@ class MainActivity : ComponentActivity() {
                         paused = false
                         sleepDeadline = 0L
                     }
-                }
-                LaunchedEffect(playing) {
-                    if (!playing) transitionTargetIndex = -1
                 }
                 DisposableEffect(playing, sleeping) {
                     if (playing || sleeping && showClock || scheduleEnabled) {
@@ -867,11 +827,19 @@ class MainActivity : ComponentActivity() {
                     if (sleeping) {
                         SleepScreen(showClock, showDate, weatherEnabled, weatherLabel, glassOverlay, if (calendarEnabled) visibleCalendarEvents else emptyList(), if (notesEnabled) phoneContent else PhoneContent(), uploadUrl) { startPhotoUpload() }
                     } else if (playing && images.isNotEmpty()) {
-                        PlaybackView(images, index, nextSlideIndex, panZoom, seconds, motionSeconds, playing, paused, imageScaleMode, imagePaddingDp, playbackControlsPulse, transitionStyle, pauseMenuIndex, shuffle, sleepTimerMinutes, transitionTargetIndex >= 0, index == transitionTargetIndex,
-                            onTransitionComplete = { if (transitionTargetIndex == index) transitionTargetIndex = -1 },
+                        PlaybackView(images, index, nextSlideIndex, panZoom, seconds, motionSeconds, paused, imageScaleMode, imagePaddingDp, playbackControlsPulse, transitionStyle, pauseMenuIndex, shuffle, sleepTimerMinutes, requestedSlide,
+                            onTransitionComplete = { photo ->
+                                if (photo == requestedSlide) {
+                                    val target = images.indexOf(photo)
+                                    if (target >= 0) index = target
+                                    requestedSlide = null
+                                }
+                            },
                             showClock, showDate, weatherEnabled, weatherLabel, glassOverlay, if (calendarEnabled) visibleCalendarEvents else emptyList(), if (notesEnabled) phoneContent else PhoneContent(), uploadUrl,
-                            onNextPreloaded = { loadedNextPhoto = it },
-                            onNextPreloadFailed = { failedPreloadPhotos = failedPreloadPhotos + it },
+                            onNextPreloadFailed = { photo ->
+                                failedPreloadPhotos = failedPreloadPhotos + photo.removePrefix("uri:").removePrefix("file:")
+                                if (requestedSlide == photo) requestedSlide = null
+                            },
                             onImageMotionRequired = { currentImageNeedsMotion = it },
                             onPause = { paused = true; pauseMenuIndex = 0 },
                             onNext = { transitionToSlide(nextSlideIndex) }, onPrevious = { transitionToSlide((index - 1 + images.size) % images.size) },
@@ -1387,11 +1355,11 @@ private fun EmptyState() {
 
 @Composable
 private fun PlaybackView(
-    images: List<String>, index: Int, nextIndex: Int, panZoom: Boolean, seconds: Int, motionSeconds: Int, playing: Boolean,
+    images: List<String>, index: Int, nextIndex: Int, panZoom: Boolean, seconds: Int, motionSeconds: Int,
     paused: Boolean, imageScaleMode: String, imagePaddingDp: Int, controlsPulse: Int, transitionStyle: String, pauseMenuIndex: Int, shuffle: Boolean, sleepTimerMinutes: Int,
-    transitionInFlight: Boolean, transitionIncoming: Boolean, onTransitionComplete: () -> Unit,
+    requestedSlide: String?, onTransitionComplete: (String) -> Unit,
     showClock: Boolean, showDate: Boolean, showWeather: Boolean, weatherLabel: String, glassOverlay: Boolean, calendarEvents: List<CalendarEvent>, phoneContent: PhoneContent, uploadUrl: String?,
-    onNextPreloaded: (String) -> Unit, onNextPreloadFailed: (String) -> Unit,
+    onNextPreloadFailed: (String) -> Unit,
     onImageMotionRequired: (Boolean) -> Unit,
     onPause: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onResume: () -> Unit,
     onAddImages: () -> Unit, onAddFiles: () -> Unit, onCycleSpeed: (Int) -> Unit, onCycleMotionDuration: (Int) -> Unit,
@@ -1399,186 +1367,19 @@ private fun PlaybackView(
     onSleepNow: () -> Unit, onExit: () -> Unit
 ) {
     BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
-        val model = images[index].removePrefix("uri:").removePrefix("file:")
-        val nextModel = images.getOrNull(nextIndex)?.removePrefix("uri:")?.removePrefix("file:")
-        val density = LocalDensity.current
-        val transitionMs = transitionDurationMillis(transitionStyle)
-        // Keep the decoded aspect ratio from the invisible next-image preload. The
-        // incoming layer must use its final fit/crop geometry on its very first frame;
-        // otherwise it is briefly drawn with a viewport-sized fallback and then jumps
-        // once AsyncImage reports its intrinsic dimensions.
-        val photoAspectRatios = remember { mutableStateMapOf<String, Float>() }
         var controlsVisible by remember { mutableStateOf(true) }
         LaunchedEffect(paused, controlsPulse) {
             controlsVisible = true
             if (!paused) { delay(2800); controlsVisible = false }
         }
-        // Keep exactly the current and next photo warm. Remove the preload during a transition
-        // so an older Fire TV never has three full-screen decodes in memory at once.
-        // The Fire TV AFTM stalls on every TextureView buffer swap when the portrait
-        // surface is rotated into the landscape HDMI frame. Compose keeps image motion
-        // in the main window and avoids that extra 1080x1920 buffer queue.
-        val wantsGpuFade = false
-        var gpuRendererFailed by remember { mutableStateOf(false) }
-        val useGpuFade = wantsGpuFade && !gpuRendererFailed
-        if (!useGpuFade && playing && !paused && !transitionInFlight && nextModel != null && nextModel != model) {
-            AsyncImage(
-                model = nextModel,
-                contentDescription = null,
-                modifier = Modifier.fillMaxSize().padding(imagePaddingDp.dp).clipToBounds().graphicsLayer { alpha = 0f },
-                onSuccess = { state ->
-                    val drawable = state.result.drawable
-                    if (drawable.intrinsicWidth > 0 && drawable.intrinsicHeight > 0) {
-                        photoAspectRatios[nextModel] = drawable.intrinsicWidth.toFloat() / drawable.intrinsicHeight
-                    }
-                    onNextPreloaded(nextModel)
-                },
-                onError = { onNextPreloadFailed(nextModel) },
-                contentScale = when (imageScaleMode) {
-                    "fill" -> ContentScale.Crop
-                    "stretch" -> ContentScale.FillBounds
-                    else -> ContentScale.Fit
-                }
-            )
-        }
-        if (useGpuFade) {
-            AndroidView(
-                factory = { context -> GpuSlideshowView(context) },
-                modifier = Modifier.fillMaxSize().padding(imagePaddingDp.dp).clipToBounds(),
-                update = { view ->
-                    view.configure(
-                        current = model,
-                        next = nextModel,
-                        durationMs = transitionMs,
-                        scaleMode = imageScaleMode,
-                        motion = (panZoom || imageScaleMode == "ken_burns") && playing && !paused,
-                        seconds = seconds,
-                        panDuration = motionSeconds,
-                        onReady = onNextPreloaded,
-                        onFailed = onNextPreloadFailed,
-                        onMotionRequired = onImageMotionRequired,
-                        onRendererFailure = { gpuRendererFailed = true }
-                    )
-                }
-            )
-        } else {
-            val imageTransition = updateTransition(targetState = model, label = "slideshow-image-transition")
-            LaunchedEffect(imageTransition.targetState) {
-                if (imageTransition.currentState != imageTransition.targetState) {
-                    snapshotFlow { imageTransition.currentState == imageTransition.targetState }.first { it }
-                    onTransitionComplete()
-                }
-            }
-            imageTransition.AnimatedContent(
-                transitionSpec = {
-                    if (transitionStyle == "cut") {
-                        EnterTransition.None togetherWith ExitTransition.None
-                    } else {
-                        EnterTransition.None togetherWith fadeOut(tween(transitionMs, easing = LinearEasing))
-                    }.apply { targetContentZIndex = -1f }
-                },
-                modifier = Modifier.fillMaxSize(),
-                contentKey = { it }
-            ) { photo ->
-            Box(Modifier.fillMaxSize().zIndex(if (photo == model) -1f else 0f)) {
-            key(photo) {
-            val photoAspect = photoAspectRatios[photo] ?: 0f
-            val panX = remember(photo) { Animatable(0f) }
-            val panY = remember(photo) { Animatable(0f) }
-            val zoom = remember(photo) { Animatable(1f) }
-            BoxWithConstraints(
-                Modifier.fillMaxSize().padding(imagePaddingDp.dp).clipToBounds(),
-                contentAlignment = Alignment.Center
-            ) {
-                val viewportAspect = if (maxHeight.value > 0f) maxWidth.value / maxHeight.value else 1f
-                val imageAspect = photoAspect.takeIf { it > 0f } ?: viewportAspect
-                val motionImage = (panZoom || imageScaleMode == "ken_burns") && photoAspect > 0f
-                val horizontalOverflow = motionImage && imageAspect > viewportAspect * 1.015f
-                val verticalOverflow = motionImage && imageAspect < viewportAspect / 1.015f
-                val motionRequired = horizontalOverflow || verticalOverflow
-                val imageWidth = when {
-                    !motionImage -> maxWidth
-                    imageAspect > viewportAspect -> maxHeight * imageAspect
-                    else -> maxWidth
-                }
-                val imageHeight = when {
-                    !motionImage -> maxHeight
-                    imageAspect > viewportAspect -> maxHeight
-                    else -> maxWidth / imageAspect
-                }
-                val motionDuration = if (motionRequired) maxOf(seconds, motionSeconds) else seconds
-                val direction = if (index % 2 == 0) 1f else -1f
-                val travelX = with(density) { ((imageWidth * 1.045f - maxWidth) / 2f).toPx().coerceAtLeast(0f) }
-                val travelY = with(density) { ((imageHeight * 1.045f - maxHeight) / 2f).toPx().coerceAtLeast(0f) }
-
-                LaunchedEffect(photo, photoAspect, motionRequired, playing, paused, transitionInFlight, motionDuration, travelX, travelY) {
-                    // Freeze the outgoing frame while it fades over the already-rendered
-                    // incoming image. The incoming image stays at its first Ken Burns pose
-                    // until the crossfade finishes, then begins its normal movement.
-                    if (motionImage && playing && !paused && photo == model) {
-                        val startX = if (horizontalOverflow) -travelX * direction else 0f
-                        val startY = if (verticalOverflow) -travelY * direction else 0f
-                        if (transitionInFlight) {
-                            if (transitionIncoming) {
-                                zoom.snapTo(1f)
-                                panX.snapTo(startX)
-                                panY.snapTo(startY)
-                            }
-                        } else {
-                            zoom.snapTo(1f)
-                            panX.snapTo(startX)
-                            panY.snapTo(startY)
-                            kotlinx.coroutines.coroutineScope {
-                                launch { zoom.animateTo(1.045f, tween(motionDuration * 1000, easing = LinearEasing)) }
-                                if (horizontalOverflow) launch {
-                                    panX.animateTo(travelX * direction, tween(motionDuration * 1000, easing = LinearEasing))
-                                }
-                                if (verticalOverflow) launch {
-                                    panY.animateTo(travelY * direction, tween(motionDuration * 1000, easing = LinearEasing))
-                                }
-                            }
-                        }
-                    } else if (!motionImage || paused || !playing) {
-                        zoom.snapTo(1f)
-                        panX.snapTo(0f)
-                        panY.snapTo(0f)
-                    }
-                }
-                LaunchedEffect(photo, photoAspect, motionRequired) {
-                    if (photo == model) onImageMotionRequired(motionRequired)
-                }
-
-                AsyncImage(
-                    model = photo,
-                    contentDescription = "Slideshow Foto",
-                    onSuccess = { state ->
-                        val width = state.result.drawable.intrinsicWidth
-                        val height = state.result.drawable.intrinsicHeight
-                        if (width > 0 && height > 0) photoAspectRatios[photo] = width.toFloat() / height
-                        else if (photo == model && photoAspect <= 0f) photoAspectRatios[photo] = viewportAspect
-                    },
-                    modifier = if (motionImage) {
-                        Modifier.requiredSize(imageWidth, imageHeight).graphicsLayer {
-                            scaleX = zoom.value
-                            scaleY = zoom.value
-                            translationX = panX.value
-                            translationY = panY.value
-                        }
-                    } else Modifier.fillMaxSize().graphicsLayer {
-                        scaleX = zoom.value
-                        scaleY = zoom.value
-                    },
-                    contentScale = if (motionImage) ContentScale.FillBounds else when (imageScaleMode) {
-                        "fill" -> ContentScale.Crop
-                        "stretch" -> ContentScale.FillBounds
-                        else -> ContentScale.Fit
-                    }
-                )
-            }
-            }
-            }
-            }
-        }
+        val standbyIndex = if (requestedSlide == null) nextIndex else images.indexOf(requestedSlide)
+        SlideshowPhotos(
+            current = images[index], currentIndex = index, standby = images.getOrNull(standbyIndex), standbyIndex = standbyIndex,
+            advancing = requestedSlide != null, paused = paused, motionEnabled = panZoom || imageScaleMode == "ken_burns",
+            seconds = seconds, motionSeconds = motionSeconds, mode = imageScaleMode, padding = imagePaddingDp.dp,
+            fadeMillis = transitionDurationMillis(transitionStyle), onAdvance = onTransitionComplete,
+            onFailed = onNextPreloadFailed, onMotionRequired = onImageMotionRequired
+        )
         if (showClock || showDate || showWeather && weatherLabel.isNotBlank() || calendarEvents.isNotEmpty() || phoneContent.hasContent || uploadUrl != null) {
             TimeWeatherOverlay(showClock, showDate, showWeather, weatherLabel, glassOverlay, imagePaddingDp, calendarEvents, phoneContent, uploadUrl, onOpenUploadQr)
         }
